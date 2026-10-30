@@ -1,74 +1,83 @@
 # MACE Architecture Specification
+**Multi-Agent Coordination and Execution**
 
-## 1. Overview & Vision
+---
 
-**MACE** (*Machine Autonomous Control & Execution*) is a 1-to-1 remote machine AI agent orchestrator. Where large networks handle multi-tenant mesh clouds, MACE concentrates on the direct peer link: **one controller machine remotely commanding, observing, and coordinating AI agents on another target machine.**
+## 1. Executive Summary & Vision
+
+**MACE** (*Multi-Agent Coordination and Execution*) provides a specialized, robust runtime and transport layer for one machine to remotely coordinate, observe, and control AI agents running on another machine. 
+
+While multi-party mesh networks introduce complex gossip protocols, partition healing overhead, and unbounded state synchronization, MACE focuses on solving the primary developer and infrastructure problem: **one remote machine securely executing multiple AI agents under the strict command of a controlling machine over any network topology.**
 
 ```
-+--------------------+                       +--------------------+
-|  Controller Node   |                       |    Worker Node     |
-|                    |     libp2p Tunnel     |                    |
-| +----------------+ | (QUIC / WS / Relay)   | +----------------+ |
-| | React UI + Web | | <===================> | | Agent Runtime  | |
-| | (Zustand/Query)| |                       | | (CLI / Process)| |
-| +--------+-------+ |                       | +--------+-------+ |
-|          |         |                       |          |         |
-| +--------v-------+ |                       | +--------v-------+ |
-| | Orchestrator   | |                       | | Concurrency    | |
-| | Engine (Go)    | |                       | | Engine (Go)    | |
-| +--------+-------+ |                       | +--------+-------+ |
-|          |         |                       |          |         |
-| +--------v-------+ |                       | +--------v-------+ |
-| | SQLite Storage | |                       | | SQLite Storage | |
-| +----------------+ |                       | +----------------+ |
-+--------------------+                       +--------------------+
++------------------------------------+           +------------------------------------+
+|          CONTROLLER NODE           |           |          TARGET WORKER NODE        |
+|                                    |           |                                    |
+| +--------------------------------+ |           | +--------------------------------+ |
+| | React UI (Vite / shadcn / TS)  | |           | | Multi-Agent Supervisor Tree    | |
+| | - Zustand Connection State     | |           | | - Agent Process A (Claude CLI) | |
+| | - TanStack Remote Sync         | |           | | - Agent Process B (Codex CLI)  | |
+| | - Apache ECharts Telemetry     | |           | | - Agent Process C (Custom Tool)| |
+| +---------------+----------------+ |           | +----------------+---------------+ |
+|                 |                  |           |                  |                 |
+| +---------------v----------------+ |  libp2p   | +----------------v---------------+ |
+| | Orchestrator Engine            | |  Encrypted| | Concurrency Worker Pool        | |
+| | - Multi-agent task graph       | |  Yamux    | | - Bounded stream queues        | |
+| | - Dispatcher & Heartbeat       | |  Stream   | | - Context cancellation tree    | |
+| +---------------+----------------+ | <=======> | +----------------+---------------+ |
+|                 |                  | (QUIC/WS/ |                  |                 |
+| +---------------v----------------+ |  TCP)     | +----------------v---------------+ |
+| | libp2p Host (Controller)       | |           | | libp2p Host (Worker)           | |
+| | - Peer ID (Ed25519)            | |           | | - Peer ID (Ed25519)            | |
+| | - Hole punching / Relay client | |           | | - Hole punching / Relay client | |
+| +---------------+----------------+ |           | +----------------+---------------+ |
+|                 |                  |           |                  |                 |
+| +---------------v----------------+ |           | +----------------v---------------+ |
+| | SQLite Storage (WAL Mode)      | |           | | SQLite Storage (WAL Mode)      | |
+| | - Command History & Audit      | |           | | - Execution Trace & State Log  | |
+| +--------------------------------+ |           | +--------------------------------+ |
++------------------------------------+           +------------------------------------+
 ```
 
 ---
 
-## 2. Network-Agnostic P2P Layer (`internal/p2p`)
+## 2. Core Architectural Pillars
 
-MACE leverages `go-libp2p` to eliminate network boundaries:
-1. **Transports**: Native support for QUIC, TCP, and WebSockets.
-2. **NAT Traversal & Hole Punching**: DCUtR (Direct Connection Upgrade through Relay) and AutoNAT to punch through residential NATs and firewalls without port forwarding.
-3. **Relay Fallback**: Circuit Relay v2 fallback ensures connectivity even under symmetric NAT constraints.
-4. **Multiplexing & Security**: Noise handshake / TLS 1.3 protocol encryption, yamux stream multiplexing. Single TCP/QUIC connection carries multiple bi-directional data streams (logs, terminal I/O, control events).
+### 2.1 1-to-1 Remote Machine Topology
+- **Deterministic Peer Pairing**: The controller pairs with the target worker through a cryptographically signed invite or pre-shared multiaddr containing the worker's Ed25519 peer ID.
+- **Bi-directional Stream Multiplexing**: A single underlying connection carries multiplexed sub-streams:
+  - Stream `mace/control/v1`: Session commands, execution dispatches, interrupts, and heartbeats.
+  - Stream `mace/events/v1`: Real-time structured agent logs, state transitions, tool invocations, and output chunks.
+  - Stream `mace/metrics/v1`: CPU, memory, goroutine counts, and active worker telemetry.
 
----
+### 2.2 Network Agnosticism
+MACE is designed to work whether both machines are on the same home Wi-Fi, across corporate firewalls, or in separate cloud regions:
+- **Direct Hole Punching**: Uses libp2p's DCUtR (Direct Connection Upgrade through Relay) and AutoNAT to traverse residential and carrier-grade NATs.
+- **Relay Fallback**: When symmetric NAT prevents direct UDP/TCP hole punching, communication automatically routes through a Circuit Relay v2 proxy with zero application reconfiguration.
+- **Transport Flexibility**: QUIC is preferred for ultra-fast connection setup and packet loss tolerance; fallback to WebSockets and TCP ensures firewall compatibility.
 
-## 3. Concurrency & Orchestration Model (`internal/concurrency`)
+### 2.3 Individual Multi-Agent Execution Engine
+On the worker node, MACE coordinates multiple autonomous agent instances concurrently:
+- Each agent runs as an isolated subprocess or supervised goroutine.
+- Agents receive distinct working directories, virtual environments, and capability sets.
+- The controller can inspect individual agent stdout/stderr streams, pause/resume tasks, or kill hung subagents without affecting adjacent agent instances.
 
-To manage AI agents reliably without unbounded resource leaks:
-- **Supervisor Tree**: Erlang-style supervisor pattern in Go. If an agent process crashes or hangs, the supervisor handles backoff restarts, state capture, or graceful tear-down.
-- **Worker Pools & Bounded Channels**: Fixed-capacity buffered channels prevent memory bloat during high-output agent stdout/stderr bursts.
-- **Context Boundaries**: Hierarchical Go `context.Context` propagation ensures deterministic cancellation cascades when an operation is cancelled or a connection drops.
-- **Backpressure & Rate Limiting**: Token-bucket rate limiting on remote RPC calls and log streaming.
-
----
-
-## 4. Security & Isolation (`internal/security`)
-
-- **Peer Identity**: Cryptographic Ed25519 public keys identify both machines. Only authorized peer IDs are allowed to establish streams.
-- **Session Tokens**: Short-lived, HMAC-signed bearer tokens for local WebSocket & REST endpoints.
-- **Execution Boundaries**: Remote tool and bash execution run with defined environment constraints, timeouts, and working directory sandboxes.
-- **Audit Logging**: Every command invocation, state change, and agent action is persisted in SQLite with an immutable timestamped log.
-
----
-
-## 5. Persistence & Storage (`internal/storage`)
-
-- **Engine**: SQLite in WAL (Write-Ahead Logging) mode.
-- **Entities**:
-  - `nodes`: Controller and worker peer profiles and keys.
-  - `sessions`: Active and historical agent orchestration runs.
-  - `tasks`: Individual steps dispatched to remote agents.
-  - `events`: Streamed log outputs, metrics, and error traces.
+### 2.4 Persistent State & Local Autonomy
+- Both controller and worker persist their state in SQLite with WAL (Write-Ahead Logging) enabled.
+- If the network connection drops, the worker's agent supervisor continues running the scheduled work locally.
+- When the controller reconnects, the worker replays unacknowledged event streams from SQLite to achieve eventual consistency.
 
 ---
 
-## 6. Frontend Telemetry & Control (`web/`)
+## 3. Subsystem Breakdown
 
-- **React + Tailwind + shadcn/ui**: High-performance, clean responsive dashboard.
-- **Zustand**: Client-side state store for real-time peer connection status and active agent tabs.
-- **TanStack Query**: Remote query caching and synchronization.
-- **Apache ECharts**: Live concurrency metrics, token usage, latency, and CPU/memory utilization of the remote agent host.
+| Subsystem | Location | Responsibility |
+|---|---|---|
+| **P2P Transport** | `internal/p2p` | Manages libp2p host lifecycle, peer connection, NAT traversal, and Yamux multiplexers. |
+| **Concurrency Core** | `internal/concurrency` | Implements supervisor trees, worker pools, bounded channels, and graceful shutdown contexts. |
+| **Orchestrator** | `internal/orchestrator` | Coordinates multi-agent task dispatch, order of execution, and dependency resolution. |
+| **Agent Runtime** | `internal/agent` | Spawns, controls, and monitors OS processes and CLI agents with stdin/stdout piping. |
+| **Persistence** | `internal/storage` | Manages SQLite schemas, WAL connections, event logs, and audit trails. |
+| **API & WebSockets** | `internal/api` | Provides local REST and WebSocket endpoints for the frontend dashboard. |
+| **Security Layer** | `internal/security` | Verifies cryptographic identity, signs auth tokens, and validates sandbox boundaries. |
+| **Frontend UI** | `web/` | React single-page application with Zustand, TanStack Query, and Apache ECharts. |
