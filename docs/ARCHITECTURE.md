@@ -7,7 +7,7 @@
 
 **MACE** (*Multi-Agent Coordination and Execution*) provides a specialized, robust runtime and transport layer for one machine to remotely coordinate, observe, and control AI agents running on another machine. 
 
-While multi-party mesh networks introduce complex gossip protocols, partition healing overhead, and unbounded state synchronization, MACE focuses on solving the primary developer and infrastructure problem: **one remote machine securely executing multiple AI agents under the strict command of a controlling machine over any network topology.**
+Using **Tailscale** (`tsnet`) as its primary networking layer alongside `libp2p`, MACE eliminates network boundaries through an encrypted WireGuard mesh, enabling instant 1-to-1 machine communication without opening firewall ports, requiring root privileges, or configuring complex NAT traversal rules.
 
 ```
 +------------------------------------+           +------------------------------------+
@@ -20,16 +20,16 @@ While multi-party mesh networks introduce complex gossip protocols, partition he
 | | - Apache ECharts Telemetry     | |           | | - Agent Process C (Custom Tool)| |
 | +---------------+----------------+ |           | +----------------+---------------+ |
 |                 |                  |           |                  |                 |
-| +---------------v----------------+ |  libp2p   | +----------------v---------------+ |
-| | Orchestrator Engine            | |  Encrypted| | Concurrency Worker Pool        | |
-| | - Multi-agent task graph       | |  Yamux    | | - Bounded stream queues        | |
-| | - Dispatcher & Heartbeat       | |  Stream   | | - Context cancellation tree    | |
-| +---------------+----------------+ | <=======> | +----------------+---------------+ |
-|                 |                  | (QUIC/WS/ |                  |                 |
-| +---------------v----------------+ |  TCP)     | +----------------v---------------+ |
-| | libp2p Host (Controller)       | |           | | libp2p Host (Worker)           | |
-| | - Peer ID (Ed25519)            | |           | | - Peer ID (Ed25519)            | |
-| | - Hole punching / Relay client | |           | | - Hole punching / Relay client | |
+| +---------------v----------------+ |           | +----------------v---------------+ |
+| | Orchestrator Engine            | |           | | Concurrency Worker Pool        | |
+| | - Multi-agent task graph       | |           | | - Bounded stream queues        | |
+| | - Dispatcher & Heartbeat       | |           | | - Context cancellation tree    | |
+| +---------------+----------------+ | Tailscale | +----------------+---------------+ |
+|                 |                  | WireGuard |                  |                 |
+| +---------------v----------------+ | Mesh / WS | +----------------v---------------+ |
+| | Tailscale tsnet / libp2p Host  | | <=======> | | Tailscale tsnet / libp2p Host  | |
+| | - Hostname: mace-controller    | | (Encrypted| | - Hostname: mace-worker-1      | |
+| | - User-space, No root required | |  Tunnel)  | | - User-space, No root required | |
 | +---------------+----------------+ |           | +----------------+---------------+ |
 |                 |                  |           |                  |                 |
 | +---------------v----------------+ |           | +----------------v---------------+ |
@@ -43,18 +43,19 @@ While multi-party mesh networks introduce complex gossip protocols, partition he
 
 ## 2. Core Architectural Pillars
 
-### 2.1 1-to-1 Remote Machine Topology
-- **Deterministic Peer Pairing**: The controller pairs with the target worker through a cryptographically signed invite or pre-shared multiaddr containing the worker's Ed25519 peer ID.
-- **Bi-directional Stream Multiplexing**: A single underlying connection carries multiplexed sub-streams:
+### 2.1 Tailscale WireGuard Mesh & Connection Layer
+- **Embedded `tsnet` User-Space Engine**: Runs inside the MACE Go process without requiring root privileges (`sudo`), kernel TUN/TAP interfaces, or a system Tailscale daemon.
+- **MagicDNS Addressing**: Controller and worker communicate via predictable human-readable names (`mace-worker-1:8080`).
+- **Encrypted Point-to-Point**: Direct peer-to-peer WireGuard tunnels with ChaCha20-Poly1305 encryption.
+- **NAT Traversal & DERP Relays**: Traverses NATs and corporate firewalls automatically, with fallback to global DERP relay nodes.
+- **Secondary libp2p Transport**: Direct TCP/QUIC hole punching and multi-stream multiplexing for environments without Tailscale credentials.
+
+### 2.2 1-to-1 Remote Machine Topology
+- **Deterministic Peer Pairing**: The controller pairs with the target worker through a cryptographically signed invite, pre-shared Tailscale hostname, or multiaddr.
+- **Bi-directional Stream Multiplexing**: A single connection carries multiplexed sub-streams:
   - Stream `mace/control/v1`: Session commands, execution dispatches, interrupts, and heartbeats.
   - Stream `mace/events/v1`: Real-time structured agent logs, state transitions, tool invocations, and output chunks.
   - Stream `mace/metrics/v1`: CPU, memory, goroutine counts, and active worker telemetry.
-
-### 2.2 Network Agnosticism
-MACE is designed to work whether both machines are on the same home Wi-Fi, across corporate firewalls, or in separate cloud regions:
-- **Direct Hole Punching**: Uses libp2p's DCUtR (Direct Connection Upgrade through Relay) and AutoNAT to traverse residential and carrier-grade NATs.
-- **Relay Fallback**: When symmetric NAT prevents direct UDP/TCP hole punching, communication automatically routes through a Circuit Relay v2 proxy with zero application reconfiguration.
-- **Transport Flexibility**: QUIC is preferred for ultra-fast connection setup and packet loss tolerance; fallback to WebSockets and TCP ensures firewall compatibility.
 
 ### 2.3 Individual Multi-Agent Execution Engine
 On the worker node, MACE coordinates multiple autonomous agent instances concurrently:
@@ -73,7 +74,8 @@ On the worker node, MACE coordinates multiple autonomous agent instances concurr
 
 | Subsystem | Location | Responsibility |
 |---|---|---|
-| **P2P Transport** | `internal/p2p` | Manages libp2p host lifecycle, peer connection, NAT traversal, and Yamux multiplexers. |
+| **Tailscale Network** | `internal/network/tailscale` | Manages embedded `tsnet.Server` lifecycle, WireGuard auth, and MagicDNS listeners. |
+| **P2P Transport** | `internal/p2p` | Manages secondary libp2p host lifecycle, peer connection, NAT traversal, and Yamux multiplexers. |
 | **Concurrency Core** | `internal/concurrency` | Implements supervisor trees, worker pools, bounded channels, and graceful shutdown contexts. |
 | **Orchestrator** | `internal/orchestrator` | Coordinates multi-agent task dispatch, order of execution, and dependency resolution. |
 | **Agent Runtime** | `internal/agent` | Spawns, controls, and monitors OS processes and CLI agents with stdin/stdout piping. |

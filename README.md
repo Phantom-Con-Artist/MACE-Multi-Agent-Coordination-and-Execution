@@ -1,28 +1,28 @@
 # MACE — Multi-Agent Coordination and Execution
 
-> **1-to-1 Remote Machine Multi-Agent Orchestration & Control (Network Agnostic)**
+> **1-to-1 Remote Machine Multi-Agent Orchestration & Control (Tailscale & Network Agnostic)**
 
-**MACE** (*Multi-Agent Coordination and Execution*) is a high-performance, network-agnostic system designed to enable **one controller machine to remotely manage, coordinate, and execute multiple AI agents on a target worker machine**.
+**MACE** (*Multi-Agent Coordination and Execution*) is a high-performance system designed to enable **one controller machine to remotely manage, coordinate, and execute multiple AI agents on a target worker machine**.
 
-Inspired by [RAIN](../project-rain), MACE shifts the architecture from complex multi-party meshes to an ultra-resilient, dedicated **1-to-1 machine-to-machine control plane**. On the target machine, MACE supervises individual AI agents with industrial-strength concurrency, stream isolation, deterministic process cancellation, and cryptographic security.
+Powered by **Tailscale** (`tsnet`) and `libp2p`, MACE establishes an instant, encrypted, zero-configuration WireGuard mesh between machines over any network topology (NATs, firewalls, public/private clouds) without port forwarding or root privileges.
 
 ---
 
 ## Key Pillars
 
-1. **Multi-Agent Coordination & Execution**:
+1. **Tailscale Zero-Config Networking**:
+   - Embedded user-space Tailscale node (`tailscale.com/tsnet`). No `sudo`, no kernel TUN/TAP driver, and no system daemon required.
+   - Point-to-point WireGuard mesh encryption with automatic NAT traversal and DERP relay fallback.
+   - Direct connection via MagicDNS (e.g. `mace-worker-1:8080`).
+2. **Multi-Agent Coordination & Execution**:
    - Controller sends high-level tasks, orchestrates agent dependencies, and streams bidirectional interactions.
-   - Target machine executes agents independently in dedicated supervisor pools with isolated context and resource limits.
-2. **Network Agnostic (Zero-Config Connectivity)**:
-   - Built on `go-libp2p`: connects across local LAN, strict NATs, dynamic IPs, and WAN without opening firewall ports.
-   - Hole punching (DCUtR / AutoNAT) with seamless Circuit Relay v2 fallback.
-   - Dual transport support: QUIC, WebSockets, and TCP with Yamux multiplexing.
+   - Target worker machine executes individual agents concurrently in isolated supervisor pools with bounded context and resource limits.
 3. **Robust Concurrency Engine**:
    - Supervisor trees and worker pools written in Go (`errgroup`, `sync`, bounded channels).
    - Backpressure management prevents memory leaks during high-throughput stdout/stderr log bursts.
    - Context-bounded cancellation ensures no orphaned CLI or subagent processes.
 4. **Defense-in-Depth Security**:
-   - Ed25519 cryptographic peer identities (Noise / TLS 1.3 channel encryption).
+   - WireGuard point-to-point cryptographic encryption and Tailnet ACL tags.
    - HMAC session tokens for local API endpoints.
    - Granular execution permissions and sandboxed working directories.
    - Append-only SQLite audit log recording every remote instruction, tool execution, and state change.
@@ -34,7 +34,7 @@ Inspired by [RAIN](../project-rain), MACE shifts the architecture from complex m
 | Layer | Technologies & Dependencies | Purpose |
 |---|---|---|
 | **Core & Daemon** | Go 1.26+ | Fast, statically compiled, low-overhead daemon |
-| **P2P Networking** | `go-libp2p`, `quic-go`, `yamux` | NAT hole punching, secure peer identity, multi-stream multiplexing |
+| **Networking & Mesh** | [`tailscale.com/tsnet`](https://tailscale.com) & `go-libp2p` | User-space WireGuard mesh, MagicDNS, DERP fallback, zero-config P2P |
 | **HTTP & WebSockets** | `go-chi/chi/v5`, `gorilla/websocket` | REST control API, real-time event & terminal streaming |
 | **Concurrency Primitives** | `golang.org/x/sync` (`errgroup`, `semaphore`) | Actor-style process supervisors, worker pools, bounded streams |
 | **Persistence & Audit** | SQLite (`modernc.org/sqlite` pure Go) | Session state, task history, audit trails (WAL mode) |
@@ -58,6 +58,8 @@ project-mace/
 │   ├── api/                     # go-chi REST API & WebSocket handlers
 │   ├── concurrency/             # Supervisor trees, worker pools, queues
 │   ├── config/                  # Node & network configuration
+│   ├── network/                 # Tailscale & connection layer
+│   │   └── tailscale/           # Embedded tsnet user-space integration
 │   ├── orchestrator/            # Multi-agent coordination engine
 │   ├── p2p/                     # libp2p host, multiaddr routing, NAT traversal
 │   ├── security/                # Peer identity, token verification, sandboxing
@@ -70,6 +72,7 @@ project-mace/
 │   └── ...
 ├── docs/                         # System specifications & technical guides
 │   ├── ARCHITECTURE.md          # End-to-end system architecture
+│   ├── TAILSCALE.md             # Tailscale networking, tsnet, and ACL guide
 │   ├── CONCURRENCY.md           # Concurrency model, pools & backpressure
 │   ├── PROTOCOLS.md             # Wire protocol & WebSocket frame specs
 │   └── SECURITY.md              # Threat model, auth, and sandboxing
@@ -78,7 +81,7 @@ project-mace/
 ├── .env.example                  # Environment configuration template
 ├── .gitattributes                # LF normalization and binary attributes
 ├── .gitignore                    # Go, Node, SQLite, secrets rules
-├── go.mod                        # Go module definition
+├── go.mod                        # Go module definition (tailscale, libp2p, chi, sqlite)
 └── README.md
 ```
 
@@ -86,6 +89,7 @@ project-mace/
 
 ## Documentation Index
 
+- [Tailscale Networking Guide](file:///home/subhradeep/Development/project-mace/docs/TAILSCALE.md)
 - [Architecture Blueprint](file:///home/subhradeep/Development/project-mace/docs/ARCHITECTURE.md)
 - [Concurrency & Supervision Model](file:///home/subhradeep/Development/project-mace/docs/CONCURRENCY.md)
 - [Protocols & Framing Specification](file:///home/subhradeep/Development/project-mace/docs/PROTOCOLS.md)

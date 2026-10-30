@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# MACE - Machine Autonomous Control & Execution
+# MACE - Multi-Agent Coordination and Execution
 # .gitignore
 # -----------------------------------------------------------------------------
 
@@ -42,6 +42,11 @@ pnpm-debug.log*
 *.sqlite3
 data/
 storage/data/
+
+# Tailscale Local State & Keys
+data/tailscale/
+*.tailscale
+*.tsstate
 
 # MACE Local Runtime State & Logs
 .mace/
