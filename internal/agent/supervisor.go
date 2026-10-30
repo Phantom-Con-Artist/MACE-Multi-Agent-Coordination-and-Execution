@@ -50,6 +50,7 @@ func (m *managedAgent) snapshot() *protocol.AgentProcess {
 // Supervisor coordinates concurrent AI agent lifecycles, I/O piping, and event broadcast.
 type Supervisor struct {
 	store       *storage.Store
+	launchMu    sync.Mutex
 	sem         chan struct{} // Concurrency limiter
 	mu          sync.RWMutex
 	agents      map[string]*managedAgent
@@ -62,6 +63,17 @@ func NewSupervisor(store *storage.Store, maxConcurrent int) *Supervisor {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 10
 	}
+	// Process handles cannot survive a daemon restart. Reconcile old live records.
+	if store != nil {
+		if previous, err := store.ListAgents(context.Background()); err == nil {
+			now := time.Now().UTC()
+			for _, p := range previous {
+				if !p.Status.IsTerminal() {
+					_ = store.UpdateAgentStatus(context.Background(), p.ID, protocol.AgentStatusStopped, nil, "daemon restarted; process session unavailable", &now)
+				}
+			}
+		}
+	}
 	return &Supervisor{
 		store:       store,
 		sem:         make(chan struct{}, maxConcurrent),
@@ -72,6 +84,13 @@ func NewSupervisor(store *storage.Store, maxConcurrent int) *Supervisor {
 
 // StartAgent launches a new agent process under supervised execution.
 func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchRequest) (*protocol.AgentProcess, error) {
+	s.launchMu.Lock()
+	defer s.launchMu.Unlock()
+	if req.ID != "" {
+		if prior, _ := s.GetAgent(req.ID); prior != nil {
+			return nil, fmt.Errorf("agent ID already exists")
+		}
+	}
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid launch request: %w", err)
 	}
@@ -110,6 +129,7 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 	}
 	cmd.Env = env
 	prepareCmdPlatform(cmd)
+	cmd.Cancel = func() error { return killProcessPlatform(cmd, syscall.SIGKILL) }
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -230,6 +250,7 @@ func (s *Supervisor) pipeReader(r io.Reader, m *managedAgent, evtType protocol.E
 }
 
 func (s *Supervisor) watchProcess(m *managedAgent, streamWg *sync.WaitGroup) {
+	defer m.cancel()
 	// Wait for stdout and stderr readers to finish reading to EOF before calling cmd.Wait()
 	streamWg.Wait()
 	err := m.cmd.Wait()
@@ -305,6 +326,18 @@ func (s *Supervisor) watchProcess(m *managedAgent, streamWg *sync.WaitGroup) {
 }
 
 // SendInput writes data to the agent process stdin.
+func (s *Supervisor) CloseInput(id string) error {
+	s.mu.RLock()
+	m := s.agents[id]
+	s.mu.RUnlock()
+	if m == nil {
+		return ErrAgentNotFound
+	}
+	m.stdinMu.Lock()
+	defer m.stdinMu.Unlock()
+	return m.stdin.Close()
+}
+
 func (s *Supervisor) SendInput(agentID string, data string) error {
 	s.mu.RLock()
 	managed, exists := s.agents[agentID]

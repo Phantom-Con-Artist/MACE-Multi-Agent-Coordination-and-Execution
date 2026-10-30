@@ -2,17 +2,16 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
-	"time"
-
 	"github.com/gorilla/websocket"
 	"mace/internal/agent"
 	"mace/pkg/protocol"
+	"net/http"
+	"time"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all local / paired dashboard origins
+		return r.Header.Get("Origin") == "" || r.Header.Get("Origin") == "http://"+r.Host || r.Header.Get("Origin") == "https://"+r.Host
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -26,7 +25,7 @@ type wsClientMessage struct {
 
 func handleAgentWebSocket(supervisor *agent.Supervisor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		agentID := r.PathValue("id")
+		agentID := routeParam(r, "id")
 		if agentID == "" {
 			http.Error(w, "missing agent id", http.StatusBadRequest)
 			return

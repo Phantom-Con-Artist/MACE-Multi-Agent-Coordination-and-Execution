@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@theme inline {
+  --color-background: var(--surface);
+  --color-foreground: var(--text);
+  --color-primary: var(--text);
+  --color-primary-foreground: var(--surface);
+  --color-secondary: var(--soft);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--soft);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--selected);
+  --color-accent-foreground: var(--text);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: #777283;
+  --color-destructive: #ae4338;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}

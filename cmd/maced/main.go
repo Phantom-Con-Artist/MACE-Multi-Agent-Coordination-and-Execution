@@ -14,6 +14,7 @@ import (
 
 	"mace/internal/agent"
 	"mace/internal/api"
+	"mace/internal/bootstrap"
 	"mace/internal/concurrency"
 	"mace/internal/network/tailscale"
 	"mace/internal/storage"
@@ -21,14 +22,14 @@ import (
 )
 
 var (
-	version = "0.1.0"
+	version = bootstrap.Version
 )
 
 func main() {
 	roleFlag := flag.String("role", getEnv("MACE_NODE_ROLE", "worker"), "Operational role: 'worker' or 'controller'")
-	hostFlag := flag.String("host", getEnv("MACE_HTTP_HOST", "127.0.0.1"), "HTTP host to bind")
+	hostFlag := flag.String("host", getEnv("MACE_HTTP_HOST", "0.0.0.0"), "HTTP host to bind")
 	portFlag := flag.Int("port", getEnvInt("MACE_HTTP_PORT", 8080), "HTTP port to bind")
-	dbFlag := flag.String("db", getEnv("MACE_DB_PATH", "./data/mace.db"), "Path to SQLite database")
+	dbFlag := flag.String("db", getEnv("MACE_DB_PATH", filepath.Join(bootstrap.DataDir(), "mace.db")), "Path to SQLite database")
 	maxAgentsFlag := flag.Int("max-agents", getEnvInt("MACE_MAX_CONCURRENT_AGENTS", 10), "Max concurrent running agents")
 	authSecretFlag := flag.String("auth-secret", getEnv("MACE_AUTH_SECRET", ""), "API Bearer token secret (optional)")
 
@@ -39,6 +40,13 @@ func main() {
 	tsEphemeralFlag := flag.Bool("ts-ephemeral", getEnvBool("MACE_TS_EPHEMERAL", true), "Register as ephemeral Tailscale node")
 
 	flag.Parse()
+	if *authSecretFlag == "" {
+		token, e := bootstrap.Token(filepath.Join(filepath.Dir(*dbFlag), "access-token"))
+		if e != nil {
+			log.Fatal(e)
+		}
+		*authSecretFlag = token
+	}
 
 	log.Printf("[MACE] Starting MACE daemon v%s (Role: %s)", version, *roleFlag)
 
@@ -63,6 +71,7 @@ func main() {
 
 	// 3. Initialize Networking (Tailscale or local TCP)
 	tsNode, err := tailscale.NewNode(tailscale.Config{
+		Host:      *hostFlag,
 		AuthKey:   *tsAuthKeyFlag,
 		Hostname:  *tsHostnameFlag,
 		StateDir:  *tsStateDirFlag,
@@ -116,6 +125,11 @@ func main() {
 	}
 
 	log.Printf("[MACE] Daemon ready. Press Ctrl+C to terminate.")
+	if path := os.Getenv("MACE_READY_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte(listener.Addr().String()), 0600); err != nil {
+			log.Printf("[MACE] Could not write readiness record: %v", err)
+		}
+	}
 
 	// 6. Handle Shutdown Signals
 	sigCh := make(chan os.Signal, 1)

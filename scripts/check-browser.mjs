@@ -1,0 +1,121 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, basename } from 'node:path';
+import { spawnSync } from 'node:child_process';
+const { chromium } = await import(process.env.MACE_PLAYWRIGHT || 'playwright');
+const root = process.cwd(), testDir = mkdtempSync(join(tmpdir(), 'mace-e2e-'));
+const environments = [];
+function start(port, label) {
+  const data = join(testDir, label); mkdirSync(data);
+  const env = {...process.env, MACE_AUTH_SECRET:'', MACE_TEST_MODE:'1', MACE_HOME:data, MACE_PID_FILE:join(data,'maced.pid'), MACE_LOG_FILE:join(data,'maced.log'), MACE_FILE_ROOT:'/'};
+  environments.push(env);
+  const result=spawnSync(join(root,'bin/mace'),['start','--host','127.0.0.1','--port',String(port),'--db',join(data,'mace.db')],{cwd:root,env,encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+  assert(result.stdout.includes('Multi Agent Coordination and Execution'));
+  assert(result.stdout.includes('MACE 0.1.0'));
+  const token=readFileSync(join(data,'access-token'),'utf8');
+  assert(result.stdout.includes('#connect='+token));
+  assert.equal(spawnSync(join(root,'bin/mace'),['status'],{env,encoding:'utf8'}).status,0);
+  return {port,token,url:'http://127.0.0.1:'+port};
+}
+let browser;
+try {
+  const local=start(18080,'local'), remote=start(18081,'remote');
+  mkdirSync(join(testDir,'project'));writeFileSync(join(testDir,'project','hello.txt'),'A shared artifact from the test host.');
+  const remoteSession=await fetch(remote.url+'/api/v1/sessions',{method:'POST',headers:{Authorization:'Bearer '+remote.token,'Content-Type':'application/json'},body:JSON.stringify({provider:'diagnostic'})}).then(r=>r.json());
+  assert(remoteSession.id);
+  browser=await chromium.launch({executablePath:process.env.MACE_BROWSER,headless:true,args:['--no-sandbox']});
+  const guest=await browser.newContext({viewport:{width:1440,height:1000}});const publicPage=await guest.newPage();
+  await publicPage.goto(local.url);
+  await publicPage.getByRole('heading',{name:'Your computer. A little closer.'}).waitFor();
+  await publicPage.locator('.hero-art img').evaluate(img=>img.decode());
+  await publicPage.screenshot({path:'/tmp/mace-home-desktop.png'});
+  await publicPage.getByRole('button',{name:'See how it works'}).click();
+  await publicPage.getByRole('tab',{name:/02.*Open the link/}).click();
+  assert.equal(await publicPage.getByRole('tabpanel').count(),1);
+  await publicPage.locator('.getting-started').screenshot({path:'/tmp/mace-setup-guide.png'});
+  for(const route of ['manual','docs','troubleshoot','about']){await publicPage.goto(local.url+'/#'+route);assert.equal(await publicPage.locator('.knowledge').isVisible(),true);assert(!(await publicPage.locator('body').innerText()).includes('\u2014'))}
+  await publicPage.goto(local.url+'/#troubleshoot');await publicPage.getByLabel('Search troubleshooting').fill('token');await publicPage.getByRole('button',{name:'The access token does not work'}).click();
+  assert.equal(await publicPage.getByRole('button',{name:'The access token does not work'}).getAttribute('aria-expanded'),'true');
+  await publicPage.setViewportSize({width:390,height:844});await publicPage.goto(local.url+'/#home');await publicPage.screenshot({path:'/tmp/mace-home-phone.png',fullPage:true});
+  await publicPage.getByRole('button',{name:'Open navigation'}).click();await publicPage.getByRole('button',{name:'Switch to dark'}).click();await publicPage.getByRole('button',{name:'Close navigation'}).click();await publicPage.screenshot({path:'/tmp/mace-home-dark-phone.png'});
+  for(const width of [320,768,1280]){await publicPage.setViewportSize({width,height:800});for(const route of ['home','manual','docs','troubleshoot','about']){await publicPage.goto(local.url+'/#'+route);assert(await publicPage.evaluate(()=>document.querySelector('.public-site').scrollWidth<=innerWidth),route+' public overflow at '+width)}}
+  await guest.close();
+  const page=await browser.newPage({viewport:{width:1440,height:960}});
+  page.on('response',async r=>{if(r.status()>=400)console.error('HTTP',r.status(),new URL(r.url()).pathname,(await r.text()).slice(0,300))});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(local.url+'/#connect='+local.token);
+  await page.getByRole('button',{name:'New agent',exact:true}).click();
+  await page.getByRole('button',{name:/Start in.*Root/}).click();
+  await page.getByRole('button',{name:/^tmp\s+Folder$/}).click();
+  await page.getByRole('button',{name:new RegExp('^'+basename(testDir)+'\\s+Folder$')}).click();
+  await page.getByRole('button',{name:/^project\s+Folder$/}).click();
+  await page.getByRole('button',{name:'Use this folder'}).click();
+  await page.getByRole('button',{name:/Diagnostic echo.*Installed/}).click();
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Inspect this folder');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('.message-text').length>=2);
+  await page.screenshot({path:'/tmp/mace-v2-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.locator('.chatlist').isVisible(),false);
+  await page.screenshot({path:'/tmp/mace-v2-phone.png',fullPage:true});
+  await page.getByRole('button',{name:'Conversation controls'}).click();
+  await page.getByRole('button',{name:'Stop agent work',exact:true}).click();
+  await page.getByRole('button',{name:'Terminate agent',exact:true}).click();
+  await page.getByRole('button',{name:'Resume agent',exact:true}).click();
+  await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'Back to chats'}).click();
+  await page.getByRole('button',{name:'New agent',exact:true}).click();
+  await page.getByRole('button',{name:/Diagnostic echo.*Installed/}).click();
+  await page.getByRole('button',{name:'Back to chats'}).click();
+  await page.getByRole('button',{name:'New group',exact:true}).click();
+  await page.getByLabel('Group name').fill('Prototype team');
+  await page.getByRole('checkbox').nth(0).check();await page.getByRole('checkbox').nth(1).check();
+  await page.getByRole('button',{name:'Create group',exact:true}).click();
+  await page.locator('.policy-strip').click();
+  await page.getByLabel('How should agents work?').selectOption('goal');
+  await page.getByLabel('Goal',{exact:true}).fill('Complete the diagnostic');
+  await page.getByLabel('Maximum agent replies').fill('3');
+  await page.getByRole('button',{name:'Save mode'}).click();
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Work together');
+  if(await page.getByRole('button',{name:'Send message',exact:true}).isDisabled()){await page.screenshot({path:'/tmp/mace-v2-failure.png',fullPage:true});console.error('Disabled composer:',await page.locator('.composer').innerText(),await page.locator('.composer textarea').inputValue(),await page.locator('.error').allTextContents(),await page.locator('dialog').allTextContents())}
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.work-state')?.textContent?.includes('goal reported complete'));
+  await page.locator('.policy-strip').click();await page.getByLabel('How should agents work?').selectOption('continuous');
+  await page.getByRole('button',{name:'Save mode'}).click();
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Continue discussing');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.getByRole('button',{name:'Pause conversation'}).click();
+  await page.waitForFunction(()=>document.querySelector('.work-state')?.textContent?.includes('paused'));
+  await page.getByRole('button',{name:'Conversation controls'}).click();
+  await page.getByRole('button',{name:/Remove Diagnostic echo from group/}).first().click();
+  await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'More',exact:true}).click();
+  await page.getByRole('button',{name:'Connected hosts',exact:true}).click();
+  await page.getByRole('button',{name:'Connect a host',exact:true}).click();
+  await page.getByLabel('Name',{exact:true}).fill('Other test host');
+  await page.getByLabel('Host address').fill(remote.url);
+  await page.getByLabel('Access token',{exact:true}).fill(remote.token);
+  await page.getByRole('button',{name:'Connect host',exact:true}).click();
+  await page.getByRole('button',{name:/Other test host \/ Diagnostic echo/}).click();
+  await page.getByRole('textbox',{name:'Message',exact:true}).fill('Reply from the other host');
+  await page.getByRole('button',{name:'Send message',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('.message-text').length>=2);
+  await page.getByRole('button',{name:'Activity',exact:true}).click();
+  await page.waitForSelector('.audit-list details');
+  await page.screenshot({path:'/tmp/mace-v2-activity.png',fullPage:true});
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.getByRole('button',{name:'Switch to dark'}).click();
+  await page.screenshot({path:'/tmp/mace-v2-dark.png',fullPage:true});
+  assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+  for(const width of [320,768,1280]){await page.setViewportSize({width,height:800});for(const route of ['home','host','activity','files','hosts','apps','manual','docs','troubleshoot','about','configuration','settings','messenger']){await page.goto(local.url+'/#'+route);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),route+' overflows at '+width)}}
+  assert.deepEqual(errors,[]);
+  console.log('PASS: automatic token/link, startup banner, root/folder picker, discovered agent chat, lifecycle controls, goal/continuous groups, pause, member removal, second-host chat, activity, dark mode, responsive routes.');
+} finally {
+  if(browser)await browser.close();
+  for(const env of environments.reverse()){
+    const result=spawnSync(join(root,'bin/mace'),['stop'],{env,encoding:'utf8',timeout:12000});
+    if(result.status!==0)console.error('Test host cleanup:',result.stderr);
+  }
+}

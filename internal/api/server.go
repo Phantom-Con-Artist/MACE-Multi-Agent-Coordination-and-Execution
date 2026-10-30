@@ -2,10 +2,16 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -46,7 +52,15 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/turn") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			middleware.Timeout(60*time.Second)(next).ServeHTTP(w, r)
+		})
+	})
 	r.Use(corsMiddleware)
 
 	if cfg.AuthSecret != "" {
@@ -54,11 +68,58 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	}
 
 	handler := NewAPIHandler(supervisor, store, cfg.NodeInfo)
+	handler.fileRoot = os.Getenv("MACE_FILE_ROOT")
+	if handler.fileRoot == "" {
+		handler.fileRoot = "/"
+	}
+	r.Post("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Token string `json:"token"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || subtle.ConstantTimeCompare([]byte(body.Token), []byte(cfg.AuthSecret)) != 1 {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		sum := sha256.Sum256([]byte(cfg.AuthSecret))
+		http.SetCookie(w, &http.Cookie{Name: "mace_session", Value: hex.EncodeToString(sum[:]), Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 86400})
+		writeJSON(w, 200, map[string]bool{"connected": true})
+	})
+	r.Get("/api/session", func(w http.ResponseWriter, r *http.Request) {
+		sum := sha256.Sum256([]byte(cfg.AuthSecret))
+		cookie, err := r.Cookie("mace_session")
+		connected := cfg.AuthSecret == "" || (err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(hex.EncodeToString(sum[:]))) == 1)
+		writeJSON(w, 200, map[string]bool{"connected": connected})
+	})
 
 	// Route bindings
 	r.Get("/health", handler.Health)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/catalog", handler.catalog)
+		r.Get("/sessions", handler.sessions)
+		r.Post("/sessions", handler.sessions)
+		r.Post("/sessions/{id}/turn", handler.remoteTurn)
+		r.Post("/sessions/{id}/control", handler.controlSession)
+		r.Post("/rooms/{room}/members/{member}/remove", handler.removeMember)
+		r.Post("/rooms/{room}/members", handler.addMember)
+		r.Get("/apps", handler.apps)
+		r.Post("/host/open", handler.hostAction)
+		r.Get("/activity", handler.activity)
+		r.Get("/runs", handler.runsList)
+		r.Get("/chats/{room}/policy", handler.policy)
+		r.Post("/chats/{room}/policy", handler.policy)
+		r.Post("/chats/{room}/pause", handler.pause)
+		r.Get("/peers", handler.peers)
+		r.Post("/peers", handler.peers)
+		r.Get("/peers/{id}/sessions", handler.peerSessions)
+		r.Get("/transfers", handler.transfers)
+		r.Post("/transfers", handler.transfers)
+		r.Post("/transfers/receive", handler.receive)
+		r.Get("/files", handler.files)
+		r.Get("/rooms", handler.rooms)
+		r.Post("/rooms", handler.rooms)
+		r.Get("/chats/{room}/messages", handler.messages)
+		r.Post("/chats/{room}/messages", handler.messages)
 		r.Get("/node", handler.GetNodeInfo)
 
 		r.Route("/agents", func(r chi.Router) {
@@ -74,6 +135,11 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 			})
 		})
 	})
+	webDir := os.Getenv("MACE_WEB_DIR")
+	if webDir == "" {
+		webDir = "web/dist"
+	}
+	r.Handle("/*", http.FileServer(http.Dir(webDir)))
 
 	srv := &Server{
 		router:   r,
@@ -126,6 +192,11 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop initiates a graceful shutdown of the HTTP server.
 func (s *Server) Stop(ctx context.Context) error {
+	s.handler.runMu.Lock()
+	for _, cancel := range s.handler.runs {
+		cancel()
+	}
+	s.handler.runMu.Unlock()
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return s.httpServer.Shutdown(shutdownCtx)
@@ -150,14 +221,17 @@ func authMiddleware(secret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Health and public endpoints exempt from auth
-			if r.URL.Path == "/health" {
+			if r.URL.Path == "/health" || r.URL.Path == "/api/session" || !strings.HasPrefix(r.URL.Path, "/api/") {
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			authHeader := r.Header.Get("Authorization")
 			expected := "Bearer " + secret
-			if authHeader != expected {
+			sum := sha256.Sum256([]byte(secret))
+			cookie, err := r.Cookie("mace_session")
+			cookieOK := err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(hex.EncodeToString(sum[:]))) == 1
+			if subtle.ConstantTimeCompare([]byte(authHeader), []byte(expected)) != 1 && !cookieOK {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

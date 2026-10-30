@@ -1,24 +1,30 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"mace/internal/agent"
+	"mace/internal/storage"
+	"mace/pkg/protocol"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
-
-	"github.com/go-chi/chi/v5"
-	"mace/internal/agent"
-	"mace/internal/storage"
-	"mace/pkg/protocol"
 )
 
 type APIHandler struct {
-	supervisor *agent.Supervisor
-	store      *storage.Store
-	nodeInfo   protocol.NodeInfo
-	startTime  time.Time
+	supervisor     *agent.Supervisor
+	store          *storage.Store
+	nodeInfo       protocol.NodeInfo
+	startTime      time.Time
+	fileRoot       string
+	lifecycleMu    sync.Mutex
+	runMu          sync.Mutex
+	runs           map[string]context.CancelFunc
+	sessionMu      sync.Mutex
+	activeSessions map[string]bool
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
@@ -34,16 +40,38 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 	if nodeInfo.HostName == "" {
 		nodeInfo.HostName, _ = os.Hostname()
 	}
+	if store != nil {
+		raw, _ := store.Documents(context.Background(), "run")
+		for _, b := range raw {
+			var run Run
+			if json.Unmarshal(b, &run) == nil && run.Status == "running" {
+				run.Status = "paused"
+				run.Error = "Host restarted. Send a task to continue."
+				store.PutDocument(context.Background(), "run", run.ID, run)
+			}
+		}
+		raw, _ = store.Documents(context.Background(), "session")
+		for _, b := range raw {
+			var s Session
+			if json.Unmarshal(b, &s) == nil && s.Status == "replying" {
+				s.Status = "ready"
+				store.PutDocument(context.Background(), "session", s.ID, s)
+			}
+		}
+	}
 	return &APIHandler{
 		supervisor: supervisor,
 		store:      store,
 		nodeInfo:   nodeInfo,
 		startTime:  time.Now(),
+		runs:       make(map[string]context.CancelFunc), activeSessions: make(map[string]bool),
 	}
 }
 
 func (h *APIHandler) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"application":    "mace",
+		"version":        h.nodeInfo.Version,
 		"status":         "ok",
 		"uptime_seconds": uint64(time.Since(h.startTime).Seconds()),
 		"node_id":        h.nodeInfo.ID,
@@ -97,7 +125,7 @@ func (h *APIHandler) LaunchAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "id")
+	agentID := routeParam(r, "id")
 	proc, err := h.supervisor.GetAgent(agentID)
 	if err != nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
@@ -116,7 +144,7 @@ func (h *APIHandler) GetAgentEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentID := chi.URLParam(r, "id")
+	agentID := routeParam(r, "id")
 	afterSeq, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {
@@ -135,7 +163,7 @@ func (h *APIHandler) GetAgentEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) SendAgentInput(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "id")
+	agentID := routeParam(r, "id")
 	var req protocol.AgentInputRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
@@ -159,7 +187,7 @@ func (h *APIHandler) SendAgentInput(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *APIHandler) StopAgent(w http.ResponseWriter, r *http.Request) {
-	agentID := chi.URLParam(r, "id")
+	agentID := routeParam(r, "id")
 	var req protocol.AgentStopRequest
 	_ = json.NewDecoder(r.Body).Decode(&req) // Optional body
 

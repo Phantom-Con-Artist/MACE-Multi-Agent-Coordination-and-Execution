@@ -85,3 +85,5 @@ desktop.ini
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+web/dist/
+bin/

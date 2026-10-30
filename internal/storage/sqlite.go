@@ -54,6 +54,7 @@ func (s *Store) Close() error {
 
 func (s *Store) migrate() error {
 	schema := `
+	CREATE TABLE IF NOT EXISTS documents (kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind,id));
 	CREATE TABLE IF NOT EXISTS agents (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,

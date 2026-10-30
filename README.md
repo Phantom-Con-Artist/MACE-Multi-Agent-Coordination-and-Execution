@@ -1,96 +1,75 @@
-# MACE — Multi-Agent Coordination and Execution
+# MACE
+Multi Agent Coordination and Execution · prototype 0.1.0
 
-> **1-to-1 Remote Machine Multi-Agent Orchestration & Control (Tailscale & Network Agnostic)**
+Mace is a self-hosted browser messenger for your machine and its CLI agents. Open the same workspace from a phone, laptop, or PC. Agents run on the host; desktop apps open on the host desktop.
 
-**MACE** (*Multi-Agent Coordination and Execution*) is a high-performance system designed to enable **one controller machine to remotely manage, coordinate, and execute multiple AI agents on a target worker machine**.
+## Use it
 
-Powered by **Tailscale** (`tsnet`) and `libp2p`, MACE establishes an instant, encrypted, zero-configuration WireGuard mesh between machines over any network topology (NATs, firewalls, public/private clouds) without port forwarding or root privileges.
+Once installed, run:
 
----
+~~~sh
+mace start
+~~~
 
-## Key Pillars
+The terminal prints the MACE banner, version, local and LAN sign-in links, access token, and log location. Open a sign-in link; it connects the browser automatically. No token-generation commands or agent launch forms are needed. The public landing page, illustrated setup, Manual, Docs, Troubleshoot, and About remain explorable before sign-in. The interface uses shadcn components, Lucide icons, a self-hosted font, and original Codex Imagen artwork.
 
-1. **Tailscale Zero-Config Networking**:
-   - Embedded user-space Tailscale node (`tailscale.com/tsnet`). No `sudo`, no kernel TUN/TAP driver, and no system daemon required.
-   - Point-to-point WireGuard mesh encryption with automatic NAT traversal and DERP relay fallback.
-   - Direct connection via MagicDNS (e.g. `mace-worker-1:8080`).
-2. **Multi-Agent Coordination & Execution**:
-   - Controller sends high-level tasks, orchestrates agent dependencies, and streams bidirectional interactions.
-   - Target worker machine executes individual agents concurrently in isolated supervisor pools with bounded context and resource limits.
-3. **Robust Concurrency Engine**:
-   - Supervisor trees and worker pools written in Go (`errgroup`, `sync`, bounded channels).
-   - Backpressure management prevents memory leaks during high-throughput stdout/stderr log bursts.
-   - Context-bounded cancellation ensures no orphaned CLI or subagent processes.
-4. **Defense-in-Depth Security**:
-   - WireGuard point-to-point cryptographic encryption and Tailnet ACL tags.
-   - HMAC session tokens for local API endpoints.
-   - Granular execution permissions and sandboxed working directories.
-   - Append-only SQLite audit log recording every remote instruction, tool execution, and state change.
+In Chats, tap **+** and choose an installed agent. New sessions default to filesystem root **/**. Tap **Change** to browse to another folder, or choose **Start agent here** while browsing Host files. Multiple instances are named automatically.
 
----
+Mace discovers Codex, Claude Code, Antigravity (agy), and Muse on the host PATH. Each uses its host installation, login, and permissions. An agent invocation runs for each conversation turn, with the shared transcript supplied by Mace. These are native headless CLI adapters, not terminal emulation.
 
-## Technology Stack
+## Work together
 
-| Layer | Technologies & Dependencies | Purpose |
-|---|---|---|
-| **Core & Daemon** | Go 1.26+ | Fast, statically compiled, low-overhead daemon |
-| **Networking & Mesh** | [`tailscale.com/tsnet`](https://tailscale.com) & `go-libp2p` | User-space WireGuard mesh, MagicDNS, DERP fallback, zero-config P2P |
-| **HTTP & WebSockets** | `go-chi/chi/v5`, `gorilla/websocket` | REST control API, real-time event & terminal streaming |
-| **Concurrency Primitives** | `golang.org/x/sync` (`errgroup`, `semaphore`) | Actor-style process supervisors, worker pools, bounded streams |
-| **Persistence & Audit** | SQLite (`modernc.org/sqlite` pure Go) | Session state, task history, audit trails (WAL mode) |
-| **Web UI Framework** | React 19, TypeScript, Vite | Modern, snappy single-page dashboard |
-| **Design & UI Kit** | Tailwind CSS v4, `shadcn/ui` foundation | Polished visual interface |
-| **Iconography** | `lucide-react`, `lucide-static` SVG assets | Consistent, modern visual system |
-| **State & Caching** | Zustand, TanStack Query (React Query) | Synchronized local store & query caching |
-| **Metrics & Telemetry** | Apache ECharts (`echarts-for-react`) | Real-time agent concurrency, latency, and host resource telemetry |
+Create a group with local or connected-host agents. Choose Reply limit, Goal oriented, or Continuous mode. The reply limit counts total agent replies, not rounds. Goal mode stops when an agent reports completion with evidence, or its reply budget is reached. Continuous mode runs until paused or a reply fails. A completion report is an agent claim for the owner to inspect.
 
----
+Conversation controls offer stop, terminate, resume, and remove. Group controls also add or remove members and stop or terminate individual agents. Removal preserves chat history. Runs are paused after a host restart, so work never silently resumes.
 
-## Directory Structure
+Host provides file browsing, text/media inspection, desktop app discovery and launch, and agent controls. Activity shows conversation state, audit events, native stdout/stderr, and file transactions.
 
-```
-project-mace/
-├── cmd/                          # Executable entrypoints
-│   ├── maced/                   # Main MACE daemon (Controller or Worker)
-│   └── mactl/                   # Administrative CLI tool
-├── internal/                     # Private application core
-│   ├── agent/                   # Agent process runtime & CLI executors
-│   ├── api/                     # go-chi REST API & WebSocket handlers
-│   ├── concurrency/             # Supervisor trees, worker pools, queues
-│   ├── config/                  # Node & network configuration
-│   ├── network/                 # Tailscale & connection layer
-│   │   └── tailscale/           # Embedded tsnet user-space integration
-│   ├── orchestrator/            # Multi-agent coordination engine
-│   ├── p2p/                     # libp2p host, multiaddr routing, NAT traversal
-│   ├── security/                # Peer identity, token verification, sandboxing
-│   └── storage/                 # SQLite migrations, store & audit log
-├── pkg/                          # Public protocols & shared libraries
-│   └── protocol/                # Wire envelopes, event schemas, frame codecs
-├── web/                          # React client application
-│   ├── public/icons/            # Supportive Lucide SVG icons
-│   ├── package.json             # React, Tailwind, Lucide, Zustand, ECharts
-│   └── ...
-├── docs/                         # System specifications & technical guides
-│   ├── ARCHITECTURE.md          # End-to-end system architecture
-│   ├── TAILSCALE.md             # Tailscale networking, tsnet, and ACL guide
-│   ├── CONCURRENCY.md           # Concurrency model, pools & backpressure
-│   ├── PROTOCOLS.md             # Wire protocol & WebSocket frame specs
-│   └── SECURITY.md              # Threat model, auth, and sandboxing
-├── scripts/                      # Build, test, and release scripts
-├── .editorconfig                 # Editor styling rules
-├── .env.example                  # Environment configuration template
-├── .gitattributes                # LF normalization and binary attributes
-├── .gitignore                    # Go, Node, SQLite, secrets rules
-├── go.mod                        # Go module definition (tailscale, libp2p, chi, sqlite)
-└── README.md
-```
+To collaborate across machines, run Mace on each host, connect the other address and token in Connected hosts, and add its agents to your groups. Local agents receive file paths directly. Remote attachments are copied through Mace with SHA-256 verification, up to 32 MiB each. Both hosts must be reachable through LAN, Tailnet, or your configured private network.
 
----
+~~~sh
+mace status
+mace info               # current addresses, sign-in links, and token
+mace doctor             # port, paths, and installed-agent checks
+mace agents             # conversational instances
+mace ps                 # native processes
+mace logs --lines 50
+mace logs --follow
+mace restart
+mace version
+mace stop
+mace kill
+maced                  # foreground daemon
+mace maced             # same foreground entry point
+~~~
 
-## Documentation Index
+Startup waits for the actual HTTP health check before printing success. Occupied ports receive an actionable error; `mace start --port 0` selects a free port. Duplicate starts report the existing server. Stale PID records never authorize signalling an unrelated process. Stop and kill are safe to repeat. Lifecycle locking recovers automatically when a CLI process exits. Restart keeps the saved address, database, and access token. Forced shutdown also stops native descendants.
 
-- [Tailscale Networking Guide](file:///home/subhradeep/Development/project-mace/docs/TAILSCALE.md)
-- [Architecture Blueprint](file:///home/subhradeep/Development/project-mace/docs/ARCHITECTURE.md)
-- [Concurrency & Supervision Model](file:///home/subhradeep/Development/project-mace/docs/CONCURRENCY.md)
-- [Protocols & Framing Specification](file:///home/subhradeep/Development/project-mace/docs/PROTOCOLS.md)
-- [Security & Threat Model](file:///home/subhradeep/Development/project-mace/docs/SECURITY.md)
+## Build and install
+
+Requirements: Go matching go.mod, Node.js/npm, and a Linux host. Browser clients can use other operating systems.
+
+~~~sh
+make build
+make install
+~~~
+
+The default install prefix is ~/.local. Add ~/.local/bin to your PATH if your shell does not include it. Installation includes the web assets. Repository builds can use ./bin/mace start directly; their web assets are discovered next to the binary. Installed Mace can start from any working directory.
+
+Persistent state defaults to the user's configuration directory under mace/; on Linux this is usually ~/.config/mace. A randomly generated token is persisted with mode 0600. MACE_AUTH_SECRET overrides it. MACE_HOME selects another state location. Existing databases can be selected with MACE_DB_PATH. Environment examples are in .env.example; Mace does not source that file automatically.
+
+The default listener is 0.0.0.0:8080. MACE_HTTP_HOST and MACE_HTTP_PORT override it. The file browser defaults to the host filesystem root and operates with the daemon user's permissions; MACE_FILE_ROOT can restrict the browsing root. Desktop launch requires an active graphical session with gio/xdg-open.
+
+MACE_TS_AUTHKEY, MACE_TS_HOSTNAME, and MACE_TS_STATE_DIR configure embedded Tailscale. Actual enrollment and cross-device Tailnet access require your own credentials.
+
+## Development and verification
+
+~~~sh
+go test ./...
+go test -race ./internal/api ./internal/agent
+cd web && npm run build
+~~~
+
+The Vite development server proxies to port 8080. scripts/check-browser.mjs uses Playwright and starts two isolated test daemons on ports 18080/18081, then cleans them up. Set MACE_PLAYWRIGHT to a Playwright module entry point if it is not installed locally, and MACE_BROWSER to a Chromium executable if necessary. Its diagnostic provider is enabled only by MACE_TEST_MODE=1; it never calls an AI service.
+
+See [protocols](docs/MESSENGER-PROTOCOL.md) and [verification](docs/VERIFICATION.md). Live provider accounts, GUI apps on the owner's desktop, and actual remote networking require environment-specific verification.

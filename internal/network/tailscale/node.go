@@ -13,6 +13,7 @@ import (
 
 // Config holds the configuration for the Tailscale tsnet node.
 type Config struct {
+	Host       string
 	AuthKey    string
 	Hostname   string
 	StateDir   string
@@ -77,7 +78,11 @@ func (n *Node) Listen(ctx context.Context) (net.Listener, error) {
 	}
 
 	// Local fallback TCP listener
-	addr := fmt.Sprintf("127.0.0.1:%d", n.cfg.Port)
+	host := n.cfg.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(host, fmt.Sprint(n.cfg.Port))
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
