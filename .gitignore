@@ -87,3 +87,4 @@ desktop.ini
 !.vscode/extensions.json
 web/dist/
 bin/
+.artifacts/

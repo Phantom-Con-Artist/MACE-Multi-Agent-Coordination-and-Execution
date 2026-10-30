@@ -32,6 +32,12 @@ func (h *APIHandler) controlSession(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, e.Error(), 502)
 			return
 		}
+		cached := out
+		cached.ID = id
+		h.store.PutDocument(r.Context(), "remote-session", id, cached)
+		if req.Action != "resume" {
+			h.stopMemberRuns(id, req.Action == "remove")
+		}
 		h.audit("you", "REMOTE_AGENT_CONTROL", id, map[string]any{"action": req.Action})
 		writeJSON(w, 200, out)
 		return
@@ -47,34 +53,7 @@ func (h *APIHandler) controlSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Action != "resume" {
-		h.runMu.Lock()
-		if cancel := h.runs[id]; cancel != nil {
-			cancel()
-		}
-		raw, _ := h.store.Documents(r.Context(), "room")
-		for _, b := range raw {
-			var room Room
-			json.Unmarshal(b, &room)
-			has := false
-			members := []string{}
-			for _, m := range room.Members {
-				if m == id {
-					has = true
-				} else {
-					members = append(members, m)
-				}
-			}
-			if has {
-				if cancel := h.runs[room.ID]; cancel != nil {
-					cancel()
-				}
-				if req.Action == "remove" {
-					room.Members = members
-					h.store.PutDocument(r.Context(), "room", room.ID, room)
-				}
-			}
-		}
-		h.runMu.Unlock()
+		h.stopMemberRuns(id, req.Action == "remove")
 		processes, _ := h.supervisor.ListAgents(r.Context())
 		for _, p := range processes {
 			if p.Labels["session"] == id && !p.Status.IsTerminal() {
@@ -100,17 +79,14 @@ func (h *APIHandler) controlSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s)
 }
 func (h *APIHandler) removeMember(w http.ResponseWriter, r *http.Request) {
+	h.roomMu.Lock()
+	defer h.roomMu.Unlock()
 	var room Room
 	if h.store.Document(r.Context(), "room", routeParam(r, "room"), &room) != nil {
 		http.Error(w, "group unavailable", 404)
 		return
 	}
 	id := routeParam(r, "member")
-	h.runMu.Lock()
-	if c := h.runs[room.ID]; c != nil {
-		c()
-	}
-	h.runMu.Unlock()
 	members := []string{}
 	for _, m := range room.Members {
 		if m != id {
@@ -118,10 +94,12 @@ func (h *APIHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	room.Members = members
+	delete(room.Roles, id)
 	if e := h.store.PutDocument(r.Context(), "room", room.ID, room); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
 	}
+	h.cancelMemberTurn(room.ID, id)
 	h.audit("you", "MEMBER_REMOVED", room.ID, map[string]any{"member": id})
 	writeJSON(w, 200, room)
 }

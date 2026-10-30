@@ -25,6 +25,8 @@ type APIHandler struct {
 	runs           map[string]context.CancelFunc
 	sessionMu      sync.Mutex
 	activeSessions map[string]bool
+	roomMu         sync.Mutex
+	activeTurns    map[string]activeTurn
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
@@ -65,6 +67,7 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 		nodeInfo:   nodeInfo,
 		startTime:  time.Now(),
 		runs:       make(map[string]context.CancelFunc), activeSessions: make(map[string]bool),
+		activeTurns: make(map[string]activeTurn),
 	}
 }
 

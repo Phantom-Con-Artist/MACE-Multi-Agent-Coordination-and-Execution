@@ -135,6 +135,10 @@ func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error
 	if s.Status == "stopped" || s.Status == "terminated" || s.Status == "removed" {
 		return "", fmt.Errorf("agent is %s; resume it before chatting", s.Status)
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	prompt = agentInstructions(s) + "\n" + prompt
 	h.sessionMu.Lock()
 	if h.activeSessions[id] {
 		h.sessionMu.Unlock()

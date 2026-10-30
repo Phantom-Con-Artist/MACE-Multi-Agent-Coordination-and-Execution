@@ -1,6 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import PublicSite from "./public-site";
 import { Button } from "@/components/ui/button";
+const AgentMessage = lazy(() => import("./agent-message"));
 import {
   MessageCircle,
   Home,
@@ -28,6 +37,10 @@ import {
   Power,
   Trash2,
   Pause,
+  FileText,
+  WifiOff,
+  ArrowDown,
+  Pencil,
 } from "lucide-react";
 type Agent = {
   id: string;
@@ -37,7 +50,7 @@ type Agent = {
   working_dir: string;
   labels?: Record<string, string>;
 };
-type Room = { id: string; name: string; members: string[] };
+type Room = { id: string; name: string; members: string[]; roles?:Record<string,string> };
 type Msg = {
   id: string;
   sender: string;
@@ -50,7 +63,7 @@ type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
 type Policy = { mode: string; goal: string; limit: number };
-type Run = { id: string; status: string; replies: number; error?: string };
+type Run = { id: string; status: string; replies: number; error?: string; active_member?:string };
 type Audit = {
   id: number;
   actor: string;
@@ -78,6 +91,25 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
 const full = (p: string) => (p === "." ? "/" : "/" + p.replace(/^\/+/, ""));
 const clock = (s: string) =>
   new Date(s).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const readableError=(error:unknown)=>{const message=(error as Error).message||String(error);if(/dial tcp|connection refused|no such host|i\/o timeout/.test(message))return 'Could not reach that host. Check its address and make sure Mace is running there.';if(/Failed to fetch|NetworkError|Load failed/.test(message))return 'The host is unavailable. Your draft is kept. Check the connection and try again.';if(/^unauthorized$/i.test(message.trim()))return 'That access token was not accepted. Use the token printed by the running host.';return message};
+const statusLabel = (status: string) =>
+  (
+    ({
+      ready: "Ready",
+      replying: "Working",
+      stopped: "Stopped",
+      terminated: "Terminated",
+      running: "Working",
+      paused: "Paused",
+      failed: "Needs attention",
+      completed: "Done",
+      limit_reached: "Reply limit reached",
+      goal_reported_complete: "Goal reported complete",
+      group: "Group",
+    }) as Record<string, string>
+  )[status] || status.replaceAll("_", " ");
+const folderName = (path: string) =>
+  path === "/" ? "Root" : path.split("/").filter(Boolean).at(-1) || path;
 function Dialog({
   title,
   close,
@@ -88,13 +120,14 @@ function Dialog({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleID=useId();
   useEffect(() => {
-    ref.current?.showModal();
-  }, []);
+    const dialog=ref.current;if(!dialog)return;if(!dialog.open)dialog.showModal();else{const first=dialog.querySelector<HTMLInputElement>('input:not([type=checkbox]),textarea,select,button');first?.focus()}
+  }, [title]);
   return (
-    <dialog ref={ref} className="dialog native-dialog" onCancel={close}>
+    <dialog ref={ref} className="dialog native-dialog" onCancel={close} aria-labelledby={titleID} onKeyDown={event=>{if(event.key!=='Tab')return;const dialog=event.currentTarget;const controls=[...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex="0"]')].filter(element=>element.getBoundingClientRect().width>0);const first=controls[0],last=controls.at(-1);if(event.shiftKey&&(document.activeElement===first||!dialog.contains(document.activeElement))){event.preventDefault();last?.focus()}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus()}}}>
       <header>
-        <h2>{title}</h2>
+        <h2 id={titleID}>{title}</h2>
         <button aria-label="Close dialog" onClick={close}>
           <X />
         </button>
@@ -110,6 +143,7 @@ export default function Workspace() {
     ),
     [dark, setDark] = useState(localStorage.getItem("mace-theme") === "dark"),
     [connected, setConnected] = useState(false),
+    [online, setOnline] = useState(true),
     [checking, setChecking] = useState(true),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -124,11 +158,20 @@ export default function Workspace() {
     [node, setNode] = useState<Record<string, unknown>>({});
   const [selected, select] = useState(""),
     [messages, setMessages] = useState<Msg[]>([]),
-    [drafts, setDrafts] = useState<Record<string, string>>({}),
-    [search, setSearch] = useState(""),
+    [drafts, setDrafts] = useState<Record<string, string>>(() => {
+      try {
+        return JSON.parse(sessionStorage.getItem("mace-drafts") || "{}");
+      } catch {
+        return {};
+      }
+    }),
+    [searches, setSearches] = useState<Record<string, string>>({}),
     [filter, setFilter] = useState("all"),
     [modal, setModal] = useState(""),
-    [attachment, setAttachment] = useState(""),
+    [attachments, setAttachments] = useState<Record<string, string>>({}),
+    [groupMembers, setGroupMembers] = useState<string[]>([]),
+    [unread, setUnread] = useState(false),
+    [roleMember,setRoleMember]=useState(''),[roleDraft,setRoleDraft]=useState(''),
     [policy, setPolicy] = useState<Policy>({
       mode: "reply",
       goal: "",
@@ -142,7 +185,24 @@ export default function Workspace() {
     [activity, setActivity] = useState<Audit[]>([]),
     [transfers, setTransfers] = useState<Transfer[]>([]),
     [apps, setApps] = useState<{ id: string; name: string }[]>([]);
+  const [activityLoading, setActivityLoading] = useState(true),
+    [appsLoading, setAppsLoading] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const messagePane = useRef<HTMLDivElement>(null),
+    composer = useRef<HTMLTextAreaElement>(null),
+    nearBottom = useRef(true),
+    busyNow = useRef(false);
+  const search = searches[page] || "";
+  const setSearch = (value: string) =>
+    setSearches((previous) => ({ ...previous, [page]: value }));
+  const attachment = attachments[selected] || "";
+  const setAttachment = (value: string) =>
+    setAttachments((previous) => ({ ...previous, [selected]: value }));
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("mace-drafts", JSON.stringify(drafts));
+    } catch {}
+  }, [drafts]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 4000);
@@ -158,20 +218,22 @@ export default function Workspace() {
     run = runs.find((r) => r.id === selected),
     running = run?.status === "running";
   const name = (id: string) =>
-    id === "you" ? "You" : all.find((a) => a.id === id)?.name || id;
+    id === "you" ? "You" : id==='mace'?'Mace':all.find((a) => a.id === id)?.name || id;
   const nav = (p: string) => {
     location.hash = p;
     setPage(p);
   };
   async function action(fn: () => Promise<void>) {
-    if (busy) return;
+    if (busyNow.current) return;
+    busyNow.current = true;
     setBusy(true);
     setError("");
     try {
       await fn();
     } catch (e) {
-      setError((e as Error).message);
+      setError(readableError(e));
     } finally {
+      busyNow.current = false;
       setBusy(false);
     }
   }
@@ -180,6 +242,7 @@ export default function Workspace() {
       const session = await api<{ connected: boolean }>("/session");
       if (!session.connected) {
         setConnected(false);
+        setOnline(true);
         return;
       }
       const [a, p, r, c, n, h, ru] = await Promise.all([
@@ -199,8 +262,9 @@ export default function Workspace() {
       setPeers(h);
       setRuns(ru);
       setConnected(true);
+      setOnline(true);
     } catch {
-      setConnected(false);
+      setOnline(false);
     }
   }
   useEffect(() => {
@@ -227,6 +291,34 @@ export default function Workspace() {
       clearInterval(id);
     };
   }, []);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      document.documentElement.style.setProperty(
+        "--viewport-height",
+        `${viewport?.height || window.innerHeight}px`,
+      );
+    };
+    resize();
+    viewport?.addEventListener("resize", resize);
+    window.addEventListener("resize", resize);
+    return () => {
+      viewport?.removeEventListener("resize", resize);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+  useEffect(() => {
+    const field = composer.current;
+    if (!field) return;
+    field.style.height = "auto";
+    field.style.height = `${Math.min(field.scrollHeight, Math.max(88, Math.min(160, window.innerHeight * 0.24)))}px`;
+  }, [drafts, selected, page]);
+  useEffect(() => {
+    if (modal === "group") setGroupMembers([]);
+  }, [modal]);
+  useEffect(() => {
+    if (connected) void import("./agent-message");
+  }, [connected]);
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("mace-theme", dark ? "dark" : "light");
@@ -269,8 +361,8 @@ export default function Workspace() {
           "/v1/chats/" + encodeURIComponent(selected) + "/messages",
         );
         if (alive) setMessages(m);
-      } catch (e) {
-        if (alive) setError((e as Error).message);
+      } catch {
+        if (alive) setOnline(false);
       }
     }
     void load();
@@ -287,11 +379,21 @@ export default function Workspace() {
         .catch(() => {});
   }, [selected]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
+    if (nearBottom.current) {
+      bottom.current?.scrollIntoView({ block: "end" });
+      setUnread(false);
+    } else {
+      setUnread(true);
+    }
   }, [messages.length, selected]);
+  useEffect(() => {
+    nearBottom.current = true;
+    setUnread(false);
+  }, [selected]);
   useEffect(() => {
     if (!connected || !["activity", "host"].includes(page)) return;
     let alive = true;
+    setActivityLoading(true);
     async function load() {
       try {
         const [a, t] = await Promise.all([
@@ -304,6 +406,8 @@ export default function Workspace() {
         }
       } catch (e) {
         if (alive) setError((e as Error).message);
+      } finally {
+        if (alive) setActivityLoading(false);
       }
     }
     void load();
@@ -311,6 +415,24 @@ export default function Workspace() {
     return () => {
       alive = false;
       clearInterval(id);
+    };
+  }, [page, connected]);
+  useEffect(() => {
+    if (page !== "apps" || !connected) return;
+    let alive = true;
+    setAppsLoading(true);
+    void api<typeof apps>("/v1/apps")
+      .then((list) => {
+        if (alive) setApps(list);
+      })
+      .catch((e) => {
+        if (alive) setError((e as Error).message);
+      })
+      .finally(() => {
+        if (alive) setAppsLoading(false);
+      });
+    return () => {
+      alive = false;
     };
   }, [page, connected]);
   async function browse(p: string, why = purpose) {
@@ -341,7 +463,15 @@ export default function Workspace() {
   }
   async function control(id: string, operation: string) {
     await action(async () => {
-      await api("/v1/sessions/" + id + "/control", { action: operation });
+      const updated = await api<Agent>("/v1/sessions/" + id + "/control", {
+        action: operation,
+      });
+      if (id.includes("::"))
+        setRemote((previous) =>
+          previous.map((agent) =>
+            agent.id === id ? { ...updated, id, name: agent.name } : agent,
+          ),
+        );
       await refresh();
       if (operation === "remove") {
         select("");
@@ -406,7 +536,7 @@ export default function Workspace() {
               }
             }}
           >
-            <Folder size={20} />
+            {e.directory ? <Folder size={20} /> : <FileText size={20} />}
             <span>{e.name}</span>
             <small>
               {e.directory ? "Folder" : Math.ceil(e.size / 1024) + " KB"}
@@ -528,14 +658,32 @@ export default function Workspace() {
         </button>
       </nav>
       <main>
+        {connected && !online && (
+          <div className="connection-banner" role="status">
+            <WifiOff size={18} />
+            <span>Connection lost. Your draft is safe. Reconnecting…</span>
+            <button onClick={() => void refresh()}>Retry</button>
+          </div>
+        )}
         {!connected ? (
           <div className="connect-screen">
             <img src="/mace-mark.svg" width="64" height="64" alt="Mace" />
-            <h1>{checking ? "Connecting…" : "Your host is one click away."}</h1>
+            <h1>
+              {checking
+                ? "Connecting…"
+                : !online
+                  ? "Your host is unavailable."
+                  : "Your host is one click away."}
+            </h1>
             <p>
               Open the sign-in link printed by <code>mace start</code>.
             </p>
-            {!checking && (
+            {!checking && !online && (
+              <button className="primary" onClick={() => void refresh()}>
+                Try again
+              </button>
+            )}
+            {!checking && online && (
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -621,7 +769,6 @@ export default function Workspace() {
                       key={c.id}
                       onClick={() => {
                         select(c.id);
-                        setAttachment("");
                       }}
                     >
                       <div className="avatar">
@@ -630,12 +777,12 @@ export default function Workspace() {
                       <div className="chatcopy">
                         <div>
                           <strong>{c.name}</strong>
-                          <small>{c.status}</small>
+                          <small>{statusLabel(c.status)}</small>
                         </div>
                         <p>
                           {c.status === "group"
                             ? `${rooms.find((r) => r.id === c.id)?.members.length} agents`
-                            : c.working_dir}
+                            : folderName(c.working_dir)}
                         </p>
                       </div>
                     </button>
@@ -655,12 +802,16 @@ export default function Workspace() {
                 )}
               </div>
               <footer className="host">
-                <span className="online" />
+                <span className={online ? "online" : "offline"} />
                 <div>
                   <strong>
                     {String(node.host_name || node.name || "Your host")}
                   </strong>
-                  <small>Connected · private workspace</small>
+                  <small>
+                    {online
+                      ? "Connected · private workspace"
+                      : "Reconnecting to host"}
+                  </small>
                 </div>
                 <button aria-label="Open host" onClick={() => nav("host")}>
                   <ChevronRight size={18} />
@@ -683,28 +834,31 @@ export default function Workspace() {
                     </div>
                     <div className="threadtitle">
                       <strong>{chat.name}</strong>
-                      <small>
+                      <small title={chat.working_dir}>
                         {running
-                          ? "Working · " + run.replies + " replies"
-                          : chat.status + " · " + chat.working_dir}
+                          ? run.active_member?name(run.active_member)+' is working':'Team conversation is running'
+                          : statusLabel(chat.status) +
+                            (chat.working_dir
+                              ? " · " + folderName(chat.working_dir)
+                              : "")}
                       </small>
                     </div>
                     <button
-                      aria-label="Pause conversation"
-                      disabled={!running || busy}
+                      aria-label={running?'Pause conversation':room&&policy.mode==='continuous'?'Start conversation':'Pause conversation'}
+                      disabled={busy||(!running&&(!room||policy.mode!=='continuous'||!room.members.length))}
                       onClick={() =>
                         void action(async () => {
                           await api(
                             "/v1/chats/" +
                               encodeURIComponent(selected) +
-                              "/pause",
+                              (running?"/pause":"/start"),
                             {},
                           );
                           await refresh();
                         })
                       }
                     >
-                      <Pause size={20} />
+                      {!running&&room&&policy.mode==='continuous'?<Play size={20}/>:<Pause size={20}/>}
                     </button>
                     <button
                       aria-label="Conversation controls"
@@ -722,16 +876,25 @@ export default function Workspace() {
                         ? "Goal: " + policy.goal
                         : policy.mode === "continuous"
                           ? "Continuous · until paused"
-                          : "Reply limit · " + policy.limit + " replies"}
+                          : "Reply limit · " +
+                            policy.limit +
+                            (policy.limit === 1 ? " reply" : " replies")}
                     </span>
                     <span>
                       Change <ChevronRight size={14} />
                     </span>
                   </button>
-                  <div className="messages">
-                    <div className="privacy-note">
-                      Files stay on your host unless you share them with another computer.
-                    </div>
+                  <div
+                    className="messages"
+                    ref={messagePane}
+                    onScroll={(e) => {
+                      const pane = e.currentTarget;
+                      nearBottom.current =
+                        pane.scrollHeight - pane.scrollTop - pane.clientHeight <
+                        96;
+                      if (nearBottom.current) setUnread(false);
+                    }}
+                  >
                     {!messages.length && (
                       <div className="startnote">
                         What would you like {chat.name} to do?
@@ -741,12 +904,35 @@ export default function Workspace() {
                       <article
                         key={m.id}
                         className={
-                          "bubble " +
+                          (m.sender==='mace'?'system-message ':'bubble ') +
                           (m.sender === "you" ? "outgoing" : "incoming")
                         }
                       >
-                        <strong className="sender">{name(m.sender)}</strong>
-                        <div className="message-text">{m.text}</div>
+                        <strong
+                          className={
+                            "sender" +
+                            (m.sender === "you" || m.sender==='mace' ||
+                            (!room && m.sender === selected)
+                              ? " sr-only"
+                              : "")
+                          }
+                        >
+                          {name(m.sender)}
+                        </strong>
+                        <div
+                          className={
+                            "message-text " +
+                            (m.sender === "you" ? "plain" : "markdown")
+                          }
+                        >
+                          {m.sender === "you" ? (
+                            m.text
+                          ) : (
+                            <Suspense fallback={<span>{m.text}</span>}>
+                              <AgentMessage text={m.text} />
+                            </Suspense>
+                          )}
+                        </div>
                         {m.file && <Media path={m.file} />}
                         <small>
                           {Object.values(m.delivery || {}).some(
@@ -773,12 +959,25 @@ export default function Workspace() {
                     )}
                     {run && !running && (
                       <div className="work-state">
-                        {run.status.replaceAll("_", " ")} · {run.replies}{" "}
-                        replies
+                        {statusLabel(run.status)} · {run.replies}{" "}
+                        {run.replies === 1 ? "reply" : "replies"}
                       </div>
                     )}
                     <div ref={bottom} />
                   </div>
+                  {unread && (
+                    <button
+                      className="new-messages"
+                      onClick={() => {
+                        nearBottom.current = true;
+                        bottom.current?.scrollIntoView({ block: "end" });
+                        setUnread(false);
+                      }}
+                    >
+                      <ArrowDown size={16} />
+                      New messages
+                    </button>
+                  )}
                   {attachment && (
                     <div className="attachment">
                       {attachment}
@@ -794,7 +993,12 @@ export default function Workspace() {
                     className="composer"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (running || busy) return;
+                      if (
+                        running ||
+                        busyNow.current ||
+                        (!(drafts[selected] || "").trim() && !attachment)
+                      )
+                        return;
                       void action(async () => {
                         const m = await api<Msg>(
                           "/v1/chats/" +
@@ -802,6 +1006,17 @@ export default function Workspace() {
                             "/messages",
                           { text: drafts[selected] || "", file: attachment },
                         );
+                        if (
+                          Object.values(m.delivery || {}).some(
+                            (value) => value !== "delivered",
+                          )
+                        ) {
+                          setMessages((v) => [...v, m]);
+                          throw Error(
+                            "Your message was saved but could not be delivered. Your draft is kept so you can try again.",
+                          );
+                        }
+                        nearBottom.current = true;
                         setMessages((v) => [...v, m]);
                         setDrafts((v) => ({ ...v, [selected]: "" }));
                         setAttachment("");
@@ -817,7 +1032,10 @@ export default function Workspace() {
                       <Paperclip size={23} />
                     </button>
                     <textarea
+                      ref={composer}
                       aria-label="Message"
+                      aria-describedby="composer-hint"
+                      autoCapitalize="sentences"
                       placeholder={
                         running
                           ? "Agents are working…"
@@ -831,7 +1049,17 @@ export default function Workspace() {
                         setDrafts((v) => ({ ...v, [conversation]: value }));
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
+                        if (e.nativeEvent.isComposing || e.keyCode === 229)
+                          return;
+                        if (
+                          e.key === "Enter" &&
+                          (e.ctrlKey ||
+                            e.metaKey ||
+                            (!e.shiftKey &&
+                              window.matchMedia(
+                                "(hover: hover) and (pointer: fine)",
+                              ).matches))
+                        ) {
                           e.preventDefault();
                           e.currentTarget.form?.requestSubmit();
                         }
@@ -842,6 +1070,7 @@ export default function Workspace() {
                       aria-label="Send message"
                       disabled={
                         busy ||
+                        !online ||
                         running ||
                         (!(drafts[selected] || "").trim() && !attachment)
                       }
@@ -849,6 +1078,10 @@ export default function Workspace() {
                       <Send size={22} />
                     </button>
                   </form>
+                  <span id="composer-hint" className="sr-only">
+                    On a phone, Enter adds a new line. Use Send or Control Enter
+                    to send. On a desktop, Shift Enter adds a new line.
+                  </span>
                 </>
               ) : (
                 <div className="welcome">
@@ -1012,28 +1245,50 @@ export default function Workspace() {
                   <Search size={18} />
                   <input
                     placeholder="Search apps"
+                    aria-label="Search host apps"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                 </label>
+                {appsLoading && (
+                  <p className="muted" role="status">
+                    Finding your host apps…
+                  </p>
+                )}
                 <div className="apps-list">
                   {apps
                     .filter((a) =>
                       a.name.toLowerCase().includes(search.toLowerCase()),
                     )
+                    .sort((a, b) => a.name.localeCompare(b.name))
                     .map((a) => (
                       <button
                         key={a.id}
+                        title={a.name}
                         disabled={busy}
                         onClick={() => void open(a.id)}
                       >
-                        <Monitor size={20} />
-                        {a.name}
+                        <span>{a.name}</span>
                         <ChevronRight size={17} />
                       </button>
                     ))}
                 </div>
-                {!apps.length && (
+                {!appsLoading &&
+                  apps.length > 0 &&
+                  !apps.some((a) =>
+                    a.name.toLowerCase().includes(search.toLowerCase()),
+                  ) && (
+                    <div className="section-empty">
+                      <p>No apps match “{search}”.</p>
+                      <button
+                        className="secondary"
+                        onClick={() => setSearch("")}
+                      >
+                        Clear search
+                      </button>
+                    </div>
+                  )}
+                {!appsLoading && !apps.length && (
                   <button
                     className="primary"
                     onClick={() => void discoverApps()}
@@ -1048,102 +1303,137 @@ export default function Workspace() {
                 <p className="lede">
                   Who did what. Native process logs and file transactions.
                 </p>
-                <div className="metrics">
-                  <div>
-                    <strong>
-                      {agents.filter((a) => a.status !== "removed").length}
-                    </strong>
-                    <span>Agent sessions</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {runs.filter((r) => r.status === "running").length}
-                    </strong>
-                    <span>Working conversations</span>
-                  </div>
-                  <div>
-                    <strong>{transfers.length}</strong>
-                    <span>Transfers</span>
-                  </div>
-                </div>
-                <h2>Conversations</h2>
-                {runs.map((r) => (
-                  <button
-                    className="process-row"
-                    key={r.id}
-                    onClick={() => {
-                      select(r.id);
-                      nav("messenger");
-                    }}
+                {activityLoading ? (
+                  <div
+                    className="activity-loading"
+                    role="status"
+                    aria-label="Loading activity"
                   >
-                    <span>
-                      {chats.find((c) => c.id === r.id)?.name || r.id}
-                    </span>
-                    <small>
-                      {r.status.replaceAll("_", " ")} · {r.replies} replies
-                    </small>
-                  </button>
-                ))}
-                <h2>Event log</h2>
-                <label className="search">
-                  <Search size={18} />
-                  <input
-                    placeholder="Filter events"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </label>
-                <div className="audit-list">
-                  {activity
-                    .filter((a) =>
-                      JSON.stringify(a)
-                        .toLowerCase()
-                        .includes(search.toLowerCase()),
-                    )
-                    .map((a) => (
-                      <details key={a.id}>
+                    <div />
+                    <div />
+                    <div />
+                  </div>
+                ) : !(
+                    activity.length ||
+                    processes.length ||
+                    runs.length ||
+                    transfers.length
+                  ) ? (
+                  <div className="activity-empty">
+                    <Activity size={30} />
+                    <h2>Nothing has run yet.</h2>
+                    <p>
+                      Start an agent or open a host app. You will find its work,
+                      logs, and file transfers here.
+                    </p>
+                    <button
+                      className="primary"
+                      onClick={() => setModal("launch")}
+                    >
+                      Choose an agent <Plus size={17} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="metrics">
+                      <div>
+                        <strong>
+                          {agents.filter((a) => a.status !== "removed").length}
+                        </strong>
+                        <span>Agent sessions</span>
+                      </div>
+                      <div>
+                        <strong>
+                          {runs.filter((r) => r.status === "running").length}
+                        </strong>
+                        <span>Working conversations</span>
+                      </div>
+                      <div>
+                        <strong>{transfers.length}</strong>
+                        <span>Transfers</span>
+                      </div>
+                    </div>
+                    {runs.length > 0 && <h2>Conversations</h2>}
+                    {runs.map((r) => (
+                      <button
+                        className="process-row"
+                        key={r.id}
+                        onClick={() => {
+                          select(r.id);
+                          nav("messenger");
+                        }}
+                      >
+                        <span>
+                          {chats.find((c) => c.id === r.id)?.name || r.id}
+                        </span>
+                        <small>
+                          {statusLabel(r.status)} · {r.replies}{" "}
+                          {r.replies === 1 ? "reply" : "replies"}
+                        </small>
+                      </button>
+                    ))}
+                    <h2>Recent activity</h2>
+                    <label className="search">
+                      <Search size={18} />
+                      <input
+                        placeholder="Filter events"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                      />
+                    </label>
+                    <div className="audit-list">
+                      {activity
+                        .filter((a) =>
+                          JSON.stringify(a)
+                            .toLowerCase()
+                            .includes(search.toLowerCase()),
+                        )
+                        .map((a) => (
+                          <details key={a.id}>
+                            <summary>
+                              <time>{clock(a.at)}</time>
+                              <span>
+                                {a.action.replaceAll("_", " ").toLowerCase()}
+                              </span>
+                              <small>{name(a.actor)}</small>
+                            </summary>
+                            <pre>
+                              {JSON.stringify(
+                                { target: a.target, details: a.details },
+                                null,
+                                2,
+                              )}
+                            </pre>
+                          </details>
+                        ))}
+                    </div>
+                    {transfers.length > 0 && <h2>File transactions</h2>}
+                    {transfers.map((t) => (
+                      <details key={t.id}>
                         <summary>
-                          <time>{clock(a.at)}</time>
-                          <span>
-                            {a.action.replaceAll("_", " ").toLowerCase()}
-                          </span>
-                          <small>{name(a.actor)}</small>
+                          {t.source} · {t.bytes} bytes · {t.status}
                         </summary>
-                        <pre>
-                          {JSON.stringify(
-                            { target: a.target, details: a.details },
-                            null,
-                            2,
-                          )}
-                        </pre>
+                        <pre>{JSON.stringify(t, null, 2)}</pre>
                       </details>
                     ))}
-                </div>
-                <h2>File transactions</h2>
-                {transfers.map((t) => (
-                  <details key={t.id}>
-                    <summary>
-                      {t.source} · {t.bytes} bytes · {t.status}
-                    </summary>
-                    <pre>{JSON.stringify(t, null, 2)}</pre>
-                  </details>
-                ))}
-                <h2>Native process logs</h2>
-                {processes.map((p) => (
-                  <button
-                    className="process-row"
-                    key={p.id}
-                    onClick={() => {
-                      select(p.id);
-                      setModal("logs");
-                    }}
-                  >
-                    <Terminal size={16} />
-                    <span>{p.name}</span>
-                    <small>{p.status}</small>
-                    <ChevronRight size={16} />
-                  </button>
-                ))}
+                    {processes.length > 0 && <h2>Native process logs</h2>}
+                    {processes.map((p) => (
+                      <button
+                        className="process-row"
+                        key={p.id}
+                        onClick={() => {
+                          select(p.id);
+                          setModal("logs");
+                        }}
+                      >
+                        <Terminal size={16} />
+                        <span>{p.name}</span>
+                        <small>{p.status}</small>
+                        <ChevronRight size={16} />
+                      </button>
+                    ))}
+                  </>
+                )}
               </>
             ) : page === "hosts" ? (
               <>
@@ -1299,7 +1589,7 @@ export default function Workspace() {
           </div>
         )}
       </main>
-      {error && (
+      {error && !modal && (
         <div className="error" role="alert">
           <span>{error}</span>
           <button aria-label="Dismiss error" onClick={() => setError("")}>
@@ -1329,10 +1619,25 @@ export default function Workspace() {
               more: "More",
               logs: "Native process log",
               transfer: "Send file",
+              role:'Assign a role',
             }[modal] || modal
           }
-          close={() => setModal("")}
+          close={() => {
+            setModal("");
+            setError("");
+          }}
         >
+          {error && (
+            <div className="dialog-error" role="alert">
+              <span>{error}</span>
+              <button
+                aria-label="Dismiss dialog error"
+                onClick={() => setError("")}
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
           {modal === "launch" ? (
             picker
           ) : modal === "files" ? (
@@ -1358,10 +1663,14 @@ export default function Workspace() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const d = new FormData(e.currentTarget);
+                if (!groupMembers.length) {
+                  setError("Choose at least one agent for this group.");
+                  return;
+                }
                 void action(async () => {
                   const r = await api<Room>("/v1/rooms", {
                     name: d.get("name"),
-                    members: d.getAll("member"),
+                    members: groupMembers,
                   });
                   await refresh();
                   select(r.id);
@@ -1385,13 +1694,36 @@ export default function Workspace() {
                   .filter((a) => a.status !== "removed")
                   .map((a) => (
                     <label className="check" key={a.id}>
-                      <input type="checkbox" name="member" value={a.id} />
-                      {a.name}
-                      <small>{a.status}</small>
+                      <input
+                        type="checkbox"
+                        name="member"
+                        value={a.id}
+                        checked={groupMembers.includes(a.id)}
+                        onChange={(e) => {
+                          const checked = e.currentTarget.checked;
+                          setGroupMembers((previous) =>
+                            checked
+                              ? [...previous, a.id]
+                              : previous.filter((id) => id !== a.id),
+                          );
+                        }}
+                      />
+                      <span>
+                        {a.name}
+                        <small>{statusLabel(a.status)}</small>
+                      </span>
                     </label>
                   ))}
               </fieldset>
-              <button className="primary" disabled={busy || !all.length}>
+              <p className="form-help">
+                {groupMembers.length
+                  ? `${groupMembers.length} ${groupMembers.length === 1 ? "agent selected" : "agents selected"}`
+                  : "Select at least one agent to continue."}
+              </p>
+              <button
+                className="primary"
+                disabled={busy || !groupMembers.length}
+              >
                 Create group
               </button>
             </form>
@@ -1404,6 +1736,8 @@ export default function Workspace() {
                     "/v1/chats/" + encodeURIComponent(selected) + "/policy",
                     policy,
                   );
+                  if(room&&policy.mode==='continuous'&&!running)await api('/v1/chats/'+encodeURIComponent(selected)+'/start',{});
+                  await refresh();
                   setModal("");
                 });
               }}
@@ -1455,7 +1789,7 @@ export default function Workspace() {
                     : "Agents take turns within this total reply budget."}
               </p>
               <button className="primary" disabled={busy || running}>
-                Save mode
+                {room&&policy.mode==='continuous'?'Save and start':'Save mode'}
               </button>
             </form>
           ) : modal === "details" ? (
@@ -1479,18 +1813,23 @@ export default function Workspace() {
                   </button>
                   {room.members.map((id) => (
                     <div className="member-row" key={id}>
-                      <span>{name(id)}</span>
+                      <span>
+                        {name(id)}
+                        <button className="member-role" aria-label={'Assign role to '+name(id)} onClick={()=>{setRoleMember(id);setRoleDraft(room.roles?.[id]||'');setModal('role')}}>{room.roles?.[id]||'No assigned role'}<Pencil size={14}/></button>
+                      </span>
                       <button
                         aria-label={"Stop " + name(id)}
                         onClick={() => void control(id, "stop")}
                       >
                         <Square size={16} />
+                        Stop
                       </button>
                       <button
                         aria-label={"Terminate " + name(id)}
                         onClick={() => void control(id, "terminate")}
                       >
                         <Power size={16} />
+                        Terminate
                       </button>
                       <button
                         aria-label={"Remove " + name(id) + " from group"}
@@ -1509,33 +1848,45 @@ export default function Workspace() {
                         }
                       >
                         <X size={18} />
+                        Remove
                       </button>
                     </div>
                   ))}
+                  {!room.members.length&&<p>No agents in this group. Add a member to start working together.</p>}
+                  <button className="control-row danger" onClick={()=>void action(async()=>{await api('/v1/rooms/'+selected+'/remove',{});await refresh();select('');setModal('');setNotice('Group removed. Its history has been kept.')})}><Trash2 size={18}/>Remove group</button>
+                  <p>Removing a member keeps their agent and direct chat. Removing the group stops its work and keeps its history.</p>
                 </>
               ) : selected.startsWith("session_") || selected.includes("::") ? (
                 <>
-                  <button
-                    className="control-row"
-                    onClick={() => void control(selected, "stop")}
-                  >
-                    <Square size={18} />
-                    Stop agent work
-                  </button>
-                  <button
-                    className="control-row"
-                    onClick={() => void control(selected, "terminate")}
-                  >
-                    <Power size={18} />
-                    Terminate agent
-                  </button>
-                  <button
-                    className="control-row"
-                    onClick={() => void control(selected, "resume")}
-                  >
-                    <Play size={18} />
-                    Resume agent
-                  </button>
+                  {chat?.status !== "terminated" &&
+                    chat?.status !== "stopped" && (
+                      <button
+                        className="control-row"
+                        onClick={() => void control(selected, "stop")}
+                      >
+                        <Square size={18} />
+                        Stop agent work
+                      </button>
+                    )}
+                  {chat?.status !== "terminated" && (
+                    <button
+                      className="control-row"
+                      onClick={() => void control(selected, "terminate")}
+                    >
+                      <Power size={18} />
+                      Terminate agent
+                    </button>
+                  )}
+                  {(chat?.status === "terminated" ||
+                    chat?.status === "stopped") && (
+                    <button
+                      className="control-row"
+                      onClick={() => void control(selected, "resume")}
+                    >
+                      <Play size={18} />
+                      Resume agent
+                    </button>
+                  )}
                   <button
                     className="control-row danger"
                     onClick={() => void control(selected, "remove")}
@@ -1552,6 +1903,8 @@ export default function Workspace() {
                 <p>Manage remote lifecycle on its host.</p>
               )}
             </>
+          ) : modal === "role" ? (
+            <form onSubmit={event=>{event.preventDefault();void action(async()=>{await api('/v1/rooms/'+selected+'/members/'+encodeURIComponent(roleMember)+'/role',{role:roleDraft});await refresh();setModal('details')})}}><p>{name(roleMember)} is unassigned unless you give them a role. Coworkers can also find responsibilities naturally while they work.</p><label>Role (optional)<input autoFocus value={roleDraft} maxLength={2000} placeholder="For example, review the mobile layouts" onChange={event=>setRoleDraft(event.currentTarget.value)}/></label><p>Clear the field to leave this coworker unassigned. Changes apply on their next turn.</p><button className="primary" disabled={busy}>Save role</button></form>
           ) : modal === "members" ? (
             <>
               {all

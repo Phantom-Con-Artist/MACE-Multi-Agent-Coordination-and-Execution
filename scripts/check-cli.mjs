@@ -18,10 +18,12 @@ try{
  for(const args of [['start','--port','no'],['start','--port','-1'],['start','--port','65536'],['start','--host']])assert.notEqual(cli(args).status,0);
  occupied=net.createServer();await new Promise(r=>occupied.listen(0,'127.0.0.1',r));const used=occupied.address().port;
  const conflict=cli(['start','--host','127.0.0.1','--port',String(used)]);assert.notEqual(conflict.status,0);assert(conflict.stderr.includes('cannot bind'));assert(!existsSync(env.MACE_PID_FILE));assert(cli(['doctor','--host','127.0.0.1','--port',String(used)]).stdout.includes('occupied'));
+ const refusal=cli(['stop','--port',String(used)]);assert.notEqual(refusal.status,0);assert(refusal.stderr.includes('no unrelated process was stopped'));assert(occupied.listening);
  await new Promise(r=>occupied.close(r));occupied=undefined;
  // A stale lock file and a PID belonging to this Node test must never block or kill it.
  writeFileSync(env.MACE_PID_FILE,String(process.pid));writeFileSync(env.MACE_PID_FILE+'.lock','stale lock');
  const start=cli(['start','--host','127.0.0.1','--port','0','--db',join(state,'mace.db')]);assert.equal(start.status,0,start.stderr);const first=info();assert(first.port>0);assert(start.stdout.includes('Server ready'));assert.equal(cli(['status']).status,0);assert(cli(['status']).stdout.includes('Health: ready'));
+ assert(cli(['ports']).stdout.includes(String(first.port)));assert.equal(cli(['status','--port',String(first.port)]).status,0);
  const homepage=await fetch(first.url,{headers:{Connection:'close'}});assert.equal(homepage.status,200);await homepage.text();assert.equal(cli(['start']).status,0);assert.equal(info().pid,first.pid);assert(cli(['start']).stdout.includes('already running'));
  assert(cli(['info']).stdout.includes(token()));assert.equal(cli(['token']).stdout.trim(),token());assert.equal(cli(['logs','--lines','2']).status,0);assert.notEqual(cli(['logs','--lines','0']).status,0);
  const other=join(state,'other');mkdirSync(other);const otherConflict=cli(['start','--host','127.0.0.1','--port',String(first.port)],{MACE_HOME:other,MACE_PID_FILE:join(other,'pid'),MACE_LOG_FILE:join(other,'log')});assert.notEqual(otherConflict.status,0);assert(otherConflict.stderr.includes('already serves Mace'));
@@ -30,7 +32,7 @@ try{
  const savedToken=token();assert.equal(cli(['restart']).status,0);assert.notEqual(info().pid,first.pid);assert.equal(token(),savedToken);assert(cli(['agents']).stdout.includes(agent.id));
  const job=await api('/agents/',{name:'force-stop tree',command:'sh',args:['-c','sleep 300 & wait']});assert(cli(['ps']).stdout.includes('force-stop tree'));await new Promise(r=>setTimeout(r,150));
  const descendants=readFileSync('/proc/'+job.pid+'/task/'+job.pid+'/children','utf8').trim().split(/\s+/).filter(Boolean).map(Number);
- assert.equal(cli(['kill']).status,0);for(let i=0;i<30&&(!dead(job.pid)||descendants.some(p=>!dead(p)));i++)await new Promise(r=>setTimeout(r,100));assert(dead(job.pid),'native process survived forced shutdown');assert(descendants.every(dead),'native child survived forced shutdown');
+ const killedPort=info().port;assert.equal(cli(['kill','--port',String(killedPort)]).status,0);for(let i=0;i<30&&(!dead(job.pid)||descendants.some(p=>!dead(p)));i++)await new Promise(r=>setTimeout(r,100));assert(dead(job.pid),'native process survived forced shutdown');assert(descendants.every(dead),'native child survived forced shutdown');assert.equal(cli(['stop','--port',String(killedPort)]).status,0);
  assert.equal(cli(['stop']).status,0);assert.equal(cli(['kill']).status,0);assert.notEqual(cli(['status']).status,0);
  const missing=cli(['start','--port','0'],{MACE_DAEMON:join(state,'missing-daemon')});assert.notEqual(missing.status,0);assert(missing.stderr.includes('daemon executable unavailable'));
  const failed=cli(['start','--host','127.0.0.1','--port','0','--not-a-real-flag']);assert.notEqual(failed.status,0);assert(failed.stderr.includes('before becoming ready'));assert(!existsSync(env.MACE_PID_FILE));

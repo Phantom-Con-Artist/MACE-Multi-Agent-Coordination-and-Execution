@@ -6,8 +6,10 @@ import (
 )
 
 func (h *APIHandler) addMember(w http.ResponseWriter, r *http.Request) {
+	h.roomMu.Lock()
+	defer h.roomMu.Unlock()
 	var room Room
-	if h.store.Document(r.Context(), "room", routeParam(r, "room"), &room) != nil {
+	if h.store.Document(r.Context(), "room", routeParam(r, "room"), &room) != nil || room.Removed {
 		http.Error(w, "group unavailable", 404)
 		return
 	}

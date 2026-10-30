@@ -115,6 +115,7 @@ func (h *APIHandler) peerSessions(w http.ResponseWriter, r *http.Request) {
 	for i := range out {
 		out[i].ID = p.ID + "::" + out[i].ID
 		out[i].Name = p.Name + " / " + out[i].Name
+		h.store.PutDocument(r.Context(), "remote-session", out[i].ID, out[i])
 	}
 	writeJSON(w, 200, out)
 }

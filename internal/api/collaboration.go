@@ -15,12 +15,13 @@ type Policy struct {
 	Limit int    `json:"limit"`
 }
 type Run struct {
-	ID      string    `json:"id"`
-	Status  string    `json:"status"`
-	Replies int       `json:"replies"`
-	Policy  Policy    `json:"policy"`
-	Error   string    `json:"error,omitempty"`
-	Updated time.Time `json:"updated"`
+	ID           string    `json:"id"`
+	Status       string    `json:"status"`
+	Replies      int       `json:"replies"`
+	Policy       Policy    `json:"policy"`
+	Error        string    `json:"error,omitempty"`
+	Updated      time.Time `json:"updated"`
+	ActiveMember string    `json:"active_member,omitempty"`
 }
 type FileLink struct {
 	Peer        string `json:"peer"`
@@ -70,7 +71,21 @@ func (h *APIHandler) runsList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, e.Error(), 500)
 		return
 	}
-	writeJSON(w, 200, v)
+	visible := []json.RawMessage{}
+	for _, b := range v {
+		var run Run
+		json.Unmarshal(b, &run)
+		var room Room
+		var session Session
+		if h.store.Document(r.Context(), "room", run.ID, &room) == nil && room.Removed {
+			continue
+		}
+		if h.store.Document(r.Context(), "session", run.ID, &session) == nil && session.Status == "removed" {
+			continue
+		}
+		visible = append(visible, b)
+	}
+	writeJSON(w, 200, visible)
 }
 func (h *APIHandler) pause(w http.ResponseWriter, r *http.Request) {
 	id := routeParam(r, "room")
@@ -91,7 +106,7 @@ func (h *APIHandler) knownMember(ctx context.Context, id string) bool {
 	}
 	var s Session
 	if h.store.Document(ctx, "session", id, &s) == nil {
-		return true
+		return s.Status != "removed"
 	}
 	p, e := h.supervisor.GetAgent(id)
 	return e == nil && p != nil
@@ -125,9 +140,10 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 	}
 	go func() {
 		defer cancel()
-		defer func() { h.runMu.Lock(); delete(h.runs, room); h.runMu.Unlock() }()
+		defer func() { h.runMu.Lock(); delete(h.runs, room); delete(h.activeTurns, room); h.runMu.Unlock() }()
 		h.audit("you", "CONVERSATION_STARTED", room, map[string]any{"mode": p.Mode, "limit": p.Limit})
 		finish := func(status string, e error) {
+			run.ActiveMember = ""
 			run.Status = status
 			if e != nil {
 				run.Error = e.Error()
@@ -137,6 +153,8 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 			h.audit("orchestrator", "CONVERSATION_"+strings.ToUpper(status), room, map[string]any{"replies": run.Replies, "error": run.Error})
 		}
 		linked := map[string]bool{}
+		lastSpeaker := ""
+		lastReply := ""
 		for index := 0; ; index++ {
 			if ctx.Err() != nil {
 				finish("paused", nil)
@@ -146,44 +164,65 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 				finish("limit_reached", nil)
 				return
 			}
-			member := members[index%len(members)]
-			if member == m.Sender {
-				if len(members) == 1 {
-					finish("completed", nil)
+			var fresh Room
+			if h.store.Document(ctx, "room", room, &fresh) == nil {
+				if fresh.Removed {
+					finish("paused", nil)
 					return
 				}
-				continue
+				members = fresh.Members
+			}
+			eligible := []string{}
+			for _, id := range members {
+				if run.Replies == 0 && id == m.Sender {
+					continue
+				}
+				if h.available(ctx, id) {
+					eligible = append(eligible, id)
+				}
+			}
+			if len(eligible) == 0 {
+				if len(members) == 1 && members[0] == m.Sender {
+					finish("completed", nil)
+				} else {
+					finish("paused", fmt.Errorf("No agents are available. Resume an agent or add a member to continue."))
+				}
+				return
+			}
+			member := eligible[0]
+			for i, id := range eligible {
+				if id == lastSpeaker {
+					member = eligible[(i+1)%len(eligible)]
+					break
+				}
+			}
+			for _, id := range eligible {
+				if id != lastSpeaker && strings.Contains(strings.ToLower(lastReply), "@"+strings.ToLower(h.memberName(ctx, id))) {
+					member = id
+					break
+				}
 			}
 			history, e := h.store.Documents(ctx, "message:"+room)
 			if e != nil {
 				finish("failed", e)
 				return
 			}
-			var transcript strings.Builder
-			transcript.WriteString("You are collaborating in a MACE conversation. Answer the latest task using the shared context. Do not invent other participants' replies.\n")
-			if p.Mode == "goal" {
-				transcript.WriteString("Goal: " + p.Goal + "\nOnly when the goal is met, include [GOAL_COMPLETE] and give evidence.\n")
-			}
-			start := len(history) - 40
-			if start < 0 {
-				start = 0
-			}
-			for _, b := range history[start:] {
-				var item Message
-				json.Unmarshal(b, &item)
-				transcript.WriteString(item.Sender + ": " + item.Text + "\n")
-				if item.File != "" {
-					transcript.WriteString("Shared host file: " + h.fileRoot + "/" + item.File + "\n")
-				}
-			}
-			prompt := truncate(transcript.String(), 100000)
+			prompt := h.conversationPrompt(ctx, room, member, members, p, history)
+			turnCtx, turnCancel := context.WithCancel(ctx)
+			h.runMu.Lock()
+			h.activeTurns[room] = activeTurn{Member: member, Cancel: turnCancel}
+			h.runMu.Unlock()
+			run.ActiveMember = member
+			run.Updated = time.Now().UTC()
+			h.store.PutDocument(ctx, "run", room, run)
 			var reply string
 			if strings.Contains(member, "::") {
 				parts := strings.SplitN(member, "::", 2)
 				key := parts[0] + ":" + m.File
 				if m.File != "" && !linked[key] {
-					file, e := h.transfer(ctx, parts[0], m.File)
+					file, e := h.transfer(turnCtx, parts[0], m.File)
 					if e != nil {
+						turnCancel()
 						finish("failed", e)
 						return
 					}
@@ -201,32 +240,48 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 						prompt += "\nUse your local copy of " + link.Source + ": " + link.Destination
 					}
 				}
-				reply, e = h.peerTurn(ctx, parts[0], parts[1], prompt)
+				reply, e = h.peerTurn(turnCtx, parts[0], parts[1], prompt)
 			} else if strings.HasPrefix(member, "session_") {
-				reply, e = h.turn(ctx, member, prompt)
+				reply, e = h.turn(turnCtx, member, prompt)
 			} else {
 				e = h.supervisor.SendInput(member, prompt+"\n")
 				if e == nil {
 					reply = "Task delivered to native process; inspect its output in the chat."
 				}
 			}
+			interrupted := turnCtx.Err() != nil
+			turnCancel()
+			h.runMu.Lock()
+			delete(h.activeTurns, room)
+			h.runMu.Unlock()
 			if ctx.Err() != nil {
 				finish("paused", nil)
 				return
 			}
 			if e != nil {
+				if interrupted || !h.available(ctx, member) {
+					continue
+				}
 				finish("failed", e)
 				return
 			}
-			response := Message{ID: newID(), Room: room, Sender: member, Text: reply, At: time.Now().UTC(), Delivery: map[string]string{}}
+			goalComplete := p.Mode == "goal" && strings.Contains(reply, "[GOAL_COMPLETE]")
+			visibleReply := reply
+			if goalComplete {
+				visibleReply = strings.TrimSpace(strings.ReplaceAll(reply, "[GOAL_COMPLETE]", ""))
+			}
+			response := Message{ID: newID(), Room: room, Sender: member, Text: visibleReply, At: time.Now().UTC(), Delivery: map[string]string{}}
 			if e := h.store.PutDocument(ctx, "message:"+room, response.ID, response); e != nil {
 				finish("failed", e)
 				return
 			}
 			run.Replies++
+			run.ActiveMember = ""
+			lastSpeaker = member
+			lastReply = reply
 			run.Updated = time.Now().UTC()
 			h.store.PutDocument(ctx, "run", room, run)
-			if p.Mode == "goal" && strings.Contains(reply, "[GOAL_COMPLETE]") {
+			if goalComplete {
 				finish("goal_reported_complete", nil)
 				return
 			}

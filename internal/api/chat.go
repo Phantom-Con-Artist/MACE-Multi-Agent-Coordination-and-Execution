@@ -13,9 +13,11 @@ import (
 )
 
 type Room struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Members []string `json:"members"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Members []string          `json:"members"`
+	Roles   map[string]string `json:"roles,omitempty"`
+	Removed bool              `json:"removed,omitempty"`
 }
 type Message struct {
 	ID       string            `json:"id"`
@@ -39,7 +41,14 @@ func (h *APIHandler) rooms(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, e.Error(), 500)
 			return
 		}
-		writeJSON(w, 200, v)
+		visible := []json.RawMessage{}
+		for _, b := range v {
+			var room Room
+			if json.Unmarshal(b, &room) == nil && !room.Removed {
+				visible = append(visible, b)
+			}
+		}
+		writeJSON(w, 200, visible)
 		return
 	}
 	var room Room
@@ -91,6 +100,10 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 		var room Room
 		json.Unmarshal(b, &room)
 		if room.ID == id {
+			if room.Removed {
+				http.Error(w, "This group was removed.", http.StatusGone)
+				return
+			}
 			members = room.Members
 			found = true
 			break
