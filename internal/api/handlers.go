@@ -1,0 +1,187 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"runtime"
+	"strconv"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"mace/internal/agent"
+	"mace/internal/storage"
+	"mace/pkg/protocol"
+)
+
+type APIHandler struct {
+	supervisor *agent.Supervisor
+	store      *storage.Store
+	nodeInfo   protocol.NodeInfo
+	startTime  time.Time
+}
+
+func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
+	if nodeInfo.StartedAt.IsZero() {
+		nodeInfo.StartedAt = time.Now().UTC()
+	}
+	if nodeInfo.OS == "" {
+		nodeInfo.OS = runtime.GOOS
+	}
+	if nodeInfo.Arch == "" {
+		nodeInfo.Arch = runtime.GOARCH
+	}
+	if nodeInfo.HostName == "" {
+		nodeInfo.HostName, _ = os.Hostname()
+	}
+	return &APIHandler{
+		supervisor: supervisor,
+		store:      store,
+		nodeInfo:   nodeInfo,
+		startTime:  time.Now(),
+	}
+}
+
+func (h *APIHandler) Health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":         "ok",
+		"uptime_seconds": uint64(time.Since(h.startTime).Seconds()),
+		"node_id":        h.nodeInfo.ID,
+		"role":           h.nodeInfo.Role,
+	})
+}
+
+func (h *APIHandler) GetNodeInfo(w http.ResponseWriter, r *http.Request) {
+	agents, _ := h.supervisor.ListAgents(r.Context())
+	info := h.nodeInfo
+	info.ActiveAgents = 0
+	for _, a := range agents {
+		if !a.Status.IsTerminal() {
+			info.ActiveAgents++
+		}
+	}
+	info.UptimeSeconds = uint64(time.Since(h.startTime).Seconds())
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (h *APIHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := h.supervisor.ListAgents(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if agents == nil {
+		agents = []*protocol.AgentProcess{}
+	}
+	writeJSON(w, http.StatusOK, agents)
+}
+
+func (h *APIHandler) LaunchAgent(w http.ResponseWriter, r *http.Request) {
+	var req protocol.AgentLaunchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	proc, err := h.supervisor.StartAgent(r.Context(), req)
+	if err != nil {
+		if err == agent.ErrPoolCapacityFull {
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, proc)
+}
+
+func (h *APIHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	proc, err := h.supervisor.GetAgent(agentID)
+	if err != nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if proc == nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, proc)
+}
+
+func (h *APIHandler) GetAgentEvents(w http.ResponseWriter, r *http.Request) {
+	if h.store == nil {
+		http.Error(w, "event storage unavailable", http.StatusNotImplemented)
+		return
+	}
+
+	agentID := chi.URLParam(r, "id")
+	afterSeq, _ := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 100
+	}
+
+	events, err := h.store.GetAgentEvents(r.Context(), agentID, afterSeq, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if events == nil {
+		events = []*protocol.AgentEvent{}
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
+func (h *APIHandler) SendAgentInput(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	var req protocol.AgentInputRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.supervisor.SendInput(agentID, req.Data); err != nil {
+		if err == agent.ErrAgentNotFound {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err == agent.ErrAgentNotRunning {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "delivered"})
+}
+
+func (h *APIHandler) StopAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	var req protocol.AgentStopRequest
+	_ = json.NewDecoder(r.Body).Decode(&req) // Optional body
+
+	timeout := time.Duration(req.GraceTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+
+	if err := h.supervisor.StopAgent(agentID, req.Signal, timeout); err != nil {
+		if err == agent.ErrAgentNotFound {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+}
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
