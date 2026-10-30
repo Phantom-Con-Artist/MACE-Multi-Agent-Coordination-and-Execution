@@ -1,0 +1,82 @@
+# -----------------------------------------------------------------------------
+# MACE - Machine Autonomous Control & Execution
+# .gitignore
+# -----------------------------------------------------------------------------
+
+# Binaries and build artifacts
+/bin/
+/dist/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+__debug_bin*
+coverage.out
+coverage.html
+
+# Go workspace & vendor (if local)
+go.work
+go.work.sum
+
+# Frontend dependencies & build outputs (React / Vite / Tailwind)
+node_modules/
+dist-ssr/
+.vite/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# SQLite Databases & Storage
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+storage/data/
+
+# MACE Local Runtime State & Logs
+.mace/
+logs/
+*.log
+*.pid
+tmp/
+temp/
+
+# Security, Identity & Secret Tokens (libp2p identities, TLS certs, keys)
+*.pem
+*.key
+*.crt
+*.pfx
+*.keystore
+*.token
+id_rsa*
+id_ed25519*
+secrets/
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE & Editor configurations
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

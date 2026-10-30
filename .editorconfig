@@ -1,0 +1,28 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+root = true
+
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# Go files use tabs per Go conventions
+[*.go]
+indent_style = tab
+indent_size = 4
+
+# Makefiles require hard tabs
+[Makefile]
+indent_style = tab
+
+# Markdown files may use trailing spaces for line breaks
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{json,yaml,yml,toml}]
+indent_style = space
+indent_size = 2
