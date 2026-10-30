@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/src/workspace.css"
+        ],
+        "createdAt": "2026-10-30T19:23:28.905Z",
+        "reason": "Codex review: finding targets .run-error, a semantic error indicator rather than a decorative card accent; retain error affordance at this checkpoint."
+      }
+    ]
+  }
+}
