@@ -53,6 +53,8 @@ type APIHandler struct {
 	push      pushState
 	// bindHost is the address the server listens on, set when it starts.
 	bindHost string
+	// tail caches this device's view of the owner's tailnet.
+	tail tailnetState
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {

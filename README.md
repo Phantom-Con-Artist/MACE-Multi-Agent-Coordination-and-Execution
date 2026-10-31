@@ -37,25 +37,26 @@ Host provides file browsing, text/media inspection, desktop app discovery and la
 
 ## Your machines: a hub and workers
 
-Every machine you use runs MACE and keeps its own data. One of them is the hub your phone opens; the others are workers whose agents join your chats. All of them must be on the same Tailscale tailnet.
+Every machine you use runs MACE and keeps its own data. One of them is the hub your phone opens; the others are workers whose agents join your chats. All of them must be logged in to the same Tailscale account.
 
-On the hub (once Tailscale is up):
-
-~~~sh
-sudo tailscale set --operator=$USER   # once, so MACE may publish over HTTPS
-mace-server start                     # starts MACE, serves it at https://<machine>.<tailnet>.ts.net
-~~~
-
-It prints a QR code. Scan it with your phone: it signs in once, without the access token, and stops working after ten minutes. Then use Add to Home Screen. `mace-server qr` prints a fresh code; Settings, Add a phone or tablet, shows one too. HTTPS needs MagicDNS and HTTPS certificates turned on in the Tailscale admin console.
-
-On each worker:
+On the hub, once:
 
 ~~~sh
-mace start                            # or mace setup, to run it as a background service
-mace join <hub address> <code>        # the code comes from mace join --invite on the hub
+sudo tailscale set --operator=$USER   # lets MACE publish over HTTPS
+mace-server setup                     # runs the hub as a service at https://<machine>.<tailnet>.ts.net
 ~~~
 
-Joining happens once per machine. After that the worker's agents appear in the hub's agent list, can be added to groups, and answer through the hub; the hub signs every request with its machine key. Chatting with a worker's agent from the hub and directly on the worker shows one history on both, marked with the machine each message came from. Files move between machines as SHA-256 chunks, so a dropped connection resumes and there is no size limit. When a machine is offline, chats say so and its agents answer once it is back. Settings, Your machines, opens another machine already signed in. `mace machines` lists them and who is available.
+On each worker, once:
+
+~~~sh
+mace setup                            # runs MACE as a service that starts at boot
+~~~
+
+That is all. Every MACE looks for MACE on your other Tailscale devices and joins them by itself, so it does not matter which machine starts first: a worker that is switched on later joins as soon as it is online. Tailscale vouches that a device is yours, so no codes are needed. Devices of other people on a shared tailnet, devices shared in from other tailnets, and tagged devices are never trusted. A machine you remove stays removed until you join it again with a code (`mace join --invite` on one, `mace join <address> <code>` on the other), which also works for machines that are not on Tailscale. Set MACE_TAILSCALE_TRUST=off to turn trust through Tailscale off.
+
+On your phone, open the hub's address with Tailscale on: it signs in by itself. Then use Add to Home Screen. For a device on another account, `mace-server qr` or Settings, Add a phone or tablet, shows a one-time QR code. HTTPS needs MagicDNS and HTTPS certificates turned on in the Tailscale admin console (DNS page). `mace-server start` does the same as setup without installing a service.
+
+Once joined, a worker's agents appear in the hub's agent list, can be added to groups, and answer through the hub; the hub signs every request with its machine key. Chatting with a worker's agent from the hub and directly on the worker shows one history on both, marked with the machine each message came from. Files move between machines as SHA-256 chunks, so a dropped connection resumes and there is no size limit. When a machine is offline, chats say so and its agents answer once it is back. Settings, Your machines, opens another machine already signed in. `mace machines` lists them and who is available.
 
 Notifications: in Settings, turn on Notifications on this device. You hear about private replies, questions, blockers, plans, decisions, and finished work; routine group chat stays quiet. They need the HTTPS address from mace-server start.
 
@@ -78,7 +79,8 @@ mace version
 mace pause-all          # stop all agent work here and on connected hosts
 mace join --invite      # print a one-time code for adding another machine
 mace machines           # joined machines and who is available
-mace-server start       # run this machine as the hub, over tailnet HTTPS, with a QR code
+mace-server setup       # run this machine as the hub service, over tailnet HTTPS
+mace-server start       # the same, without installing a service
 mace stop
 mace kill
 maced                  # foreground daemon

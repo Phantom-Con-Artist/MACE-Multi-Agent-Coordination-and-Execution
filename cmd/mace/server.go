@@ -20,6 +20,7 @@ import (
 const serverHelp = `Usage: mace-server <command>
 
   start [--port 8080]   Start MACE, serve it on your tailnet over HTTPS, and print a sign-in QR code
+  setup [--remove]      Run the hub as a background service that starts at boot
   qr                    Print a fresh one-time sign-in QR code
   status                Show the server and its tailnet address
   stop                  Stop serving on the tailnet and stop MACE
@@ -76,6 +77,8 @@ func serverCommand(args []string) error {
 	switch command {
 	case "start":
 		return c.serverStart()
+	case "setup":
+		return c.serverSetup(args)
 	case "qr":
 		return c.printSignIn()
 	case "status":
@@ -107,16 +110,10 @@ func (c settings) serverStart() error {
 	} else if err := c.start(); err != nil {
 		return err
 	}
-	target := "http://127.0.0.1:" + strconv.Itoa(c.Port)
-	out, err := exec.Command("tailscale", "serve", "--bg", "--https=443", target).CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if strings.Contains(strings.ToLower(msg), "access denied") || strings.Contains(msg, "operator") {
-			return fmt.Errorf("Tailscale needs permission to serve for you. Run sudo tailscale set --operator=$USER once, then mace-server start again.\n%s", msg)
-		}
-		return fmt.Errorf("tailscale serve did not start: %s", msg)
+	if err := c.serve(); err != nil {
+		return err
 	}
-	fmt.Printf("\nServing on your tailnet: %s\n", public)
+	fmt.Printf("\nServing on your tailnet: %s\nDevices logged in to your Tailscale account sign in by opening it, and your other machines running MACE join by themselves.\n", public)
 	return c.printSignIn()
 }
 
@@ -140,6 +137,42 @@ func (c settings) printSignIn() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\nScan to sign in your phone (works once, for 10 minutes):\n\n%s\n%s\n\nThen use Add to Home Screen. A fresh code: mace-server qr\n", code, link.Link)
+	fmt.Printf("\nOr scan this to sign in (works once, for 10 minutes):\n\n%s\n%s\n\nThen use Add to Home Screen. A fresh code: mace-server qr\n", code, link.Link)
 	return nil
+}
+
+// serverSetup installs the hub as a service. tailscale serve keeps its
+// configuration across reboots, so the HTTPS address comes back with it.
+func (c settings) serverSetup(args []string) error {
+	for _, a := range args {
+		if a == "--remove" {
+			exec.Command("tailscale", "serve", "--https=443", "off").Run()
+			return c.setup(args)
+		}
+	}
+	name, err := tailnetName()
+	if err != nil {
+		return err
+	}
+	os.Setenv("MACE_PUBLIC_URL", "https://"+name)
+	if err := c.setup(args); err != nil {
+		return err
+	}
+	if err := c.serve(); err != nil {
+		return err
+	}
+	fmt.Printf("\nThe hub is at https://%s. Open it on any device logged in to your Tailscale account; it signs in by itself.\n", name)
+	return nil
+}
+
+func (c settings) serve() error {
+	out, err := exec.Command("tailscale", "serve", "--bg", "--https=443", "http://127.0.0.1:"+strconv.Itoa(c.Port)).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(string(out))
+	if strings.Contains(strings.ToLower(msg), "access denied") || strings.Contains(msg, "operator") {
+		return fmt.Errorf("Tailscale needs permission to serve for you. Run sudo tailscale set --operator=$USER once, then try again.\n%s", msg)
+	}
+	return fmt.Errorf("tailscale serve did not start: %s", msg)
 }

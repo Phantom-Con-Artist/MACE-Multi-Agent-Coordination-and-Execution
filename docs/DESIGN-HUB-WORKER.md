@@ -125,6 +125,15 @@ Agents should spend their quota on the owner's work, not on re-reading MACE. Thr
 
 Still to do: workers on other machines reach the hub's context and code graph through their own node, which forwards signed requests to the hub (with hub step 4 routing); token usage reported by the CLIs, per agent and group, with a budget that pauses a run.
 
+## Trust through Tailscale
+
+The owner's machines and phones are recognised by their Tailscale account, so no codes are needed (`internal/api/tailnet.go`). Each MACE reads `tailscale status --json` (cached 10 s) for its own user and login and its peers' users, tags, and addresses. Only untagged devices of the same user count.
+
+- Joining: every node check round also looks for MACE on the owner's online devices it does not know, at most once a minute per device, at `https://<device DNS name>` (mace-server), then port 8080 and this machine's port. It fetches the identity there and posts `POST /nodes/autojoin` with its node and a signature over the target and itself. The receiver checks that the request comes from one of the owner's devices (by source address, or by the `Tailscale-User-Login` header that tailscale serve adds on loopback), verifies the signature, refuses removed nodes, calls back for the identity, and learns the node as a join would. Whichever machine starts first, the later one joins.
+- Phones: `GET /api/session` signs in a device whose request comes through tailscale serve with the owner's login.
+- Services: `mace setup` runs a worker at boot; `mace-server setup` runs the hub at boot with `MACE_PUBLIC_URL` in the unit, and `tailscale serve --bg` keeps the HTTPS address across reboots.
+- `MACE_TAILSCALE_TRUST=off` turns this off. A process on the hub itself could forge the header on a loopback request; such a process already runs as the owner.
+
 ## Verification that needs the real environment
 
 - Two or more real machines on the owner's tailnet, including one going to sleep and returning.

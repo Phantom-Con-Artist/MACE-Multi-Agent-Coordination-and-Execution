@@ -458,6 +458,7 @@ func (h *APIHandler) watchNodes(ctx context.Context) {
 	t := time.NewTicker(nodeCheckEvery)
 	defer t.Stop()
 	for {
+		go h.discoverMachines(ctx)
 		h.checkNodes(ctx)
 		select {
 		case <-ctx.Done():

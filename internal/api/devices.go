@@ -127,7 +127,7 @@ func (d *devices) middleware(next http.Handler) http.Handler {
 		// public, and requests between nodes are checked by their handlers
 		// against the sender's node key. Agents' context fetches carry their
 		// own read-only token, checked by the handler.
-		if r.URL.Path == "/api/v1/nodes/accept" || strings.HasPrefix(r.URL.Path, "/api/v1/ctx/") || r.URL.Path == "/api/v1/node/identity" ||
+		if r.URL.Path == "/api/v1/nodes/accept" || r.URL.Path == "/api/v1/nodes/autojoin" || strings.HasPrefix(r.URL.Path, "/api/v1/ctx/") || r.URL.Path == "/api/v1/node/identity" ||
 			(strings.HasPrefix(r.URL.Path, "/api/v1/node/") && r.Header.Get("X-Mace-Node") != "") {
 			next.ServeHTTP(w, r)
 			return

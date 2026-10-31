@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,6 +36,8 @@ func setupTestServer(t *testing.T, authSecret string) (*Server, *agent.Superviso
 	}
 
 	server := NewServer(cfg, supervisor, store)
+	// Tests never consult the real tailnet of the machine running them.
+	server.handler.tail.source = func() (tailnetView, error) { return tailnetView{}, errors.New("no tailnet in tests") }
 	return server, supervisor, store
 }
 

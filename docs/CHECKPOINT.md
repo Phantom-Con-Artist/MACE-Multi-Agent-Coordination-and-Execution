@@ -30,6 +30,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 19. Hub and worker steps 4 to 6 (see the build order in docs/DESIGN-HUB-WORKER.md): joined nodes as signed peers, merged chat history across machines, offline notices and held turns, chunked content-addressed transfers, mace-server with tailnet HTTPS and QR sign-in, one-time sign-in codes, home-screen install, Web Push notifications, and a machine switcher. Covered by tests over real HTTP between two daemons in one process, and a phone-width check of Settings on an isolated scratch server. Not run across real machines, real tailscale serve, or real push services.
 
+20. Trust through Tailscale: machines on the owner's Tailscale account find and join each other without codes (whichever starts first), phones opening the hub through tailscale serve sign in by the owner's login, and `mace-server setup` runs the hub as a boot service. Covered by tests with a simulated tailnet; not run on the real tailnet.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
@@ -63,7 +65,7 @@ After that: the rest of phase 3 (streaming viewer, pdf.js, hex view), the animat
 
 ## Be careful
 
-- Never run `bin/mace start|restart|stop|setup` without MACE_HOME, MACE_PID_FILE, MACE_LOG_FILE pointing at a scratch folder (and MACE_SERVICE_NAME for setup); otherwise it acts on the owner's live install.
+- Never run `bin/mace start|restart|stop|setup` without MACE_HOME, MACE_PID_FILE, MACE_LOG_FILE pointing at a scratch folder (and MACE_SERVICE_NAME for setup); otherwise it acts on the owner's live install. Also set MACE_TAILSCALE_TRUST=off for test daemons, or they join the owner's real machines on the tailnet.
 - Isolated test daemons used ports 18091 to 18093 with state in the session scratchpad (gone next session).
 - Tailwind scans class names: avoid utility names such as `ring`, `border`, `shadow` as custom classes.
 - Go nil slices encode as JSON null; return empty slices to the browser.

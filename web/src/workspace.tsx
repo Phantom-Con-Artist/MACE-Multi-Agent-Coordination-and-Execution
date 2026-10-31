@@ -2273,7 +2273,7 @@ export default function Workspace() {
                     <p>
                       {phoneLink
                         ? "Scan this with the other device's camera. It signs in once and stops working after ten minutes."
-                        : "Show a code that signs another device in, without sharing your access token."}
+                        : "Devices on your Tailscale account sign in just by opening this hub. For any other device, show a code that signs it in without sharing your access token."}
                     </p>
                     {phoneLink && (
                       <figure className="signin-code">
@@ -2303,7 +2303,8 @@ export default function Workspace() {
                   <div>
                     <h2>Your machines</h2>
                     <p>
-                      Machines joined with mace join. Open one to switch to it,
+                      Your other machines running MACE join by themselves
+                      through your Tailscale account. Open one to switch to it,
                       already signed in.
                     </p>
                   </div>
@@ -2330,8 +2331,8 @@ export default function Workspace() {
                     ))}
                     {!machines.some((n) => !n.self) && (
                       <li className="muted">
-                        No other machines yet. Run <code>mace join --invite</code> here,
-                        then <code>mace join</code> on the other machine.
+                        No other machines yet. Start MACE on another computer
+                        logged in to your Tailscale account and it appears here.
                       </li>
                     )}
                   </ul>

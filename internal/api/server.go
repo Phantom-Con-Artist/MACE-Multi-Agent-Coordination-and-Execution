@@ -114,6 +114,13 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		if legacy && store != nil {
 			signIns.issue(w, r)
 		}
+		// A device on the owner's Tailscale account is signed in by that.
+		if !ok && cfg.AuthSecret != "" && store != nil && handler.ownerRequest(r) {
+			if signIns.issue(w, r) == nil {
+				ok = true
+				handler.audit("you", "SIGNED_IN_BY_TAILSCALE", deviceName(r.UserAgent()), map[string]any{"login": r.Header.Get("Tailscale-User-Login")})
+			}
+		}
 		writeJSON(w, 200, map[string]bool{"connected": cfg.AuthSecret == "" || ok})
 	})
 	r.Post("/api/session/sign-out", signIns.signOut)
@@ -137,6 +144,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/nodes/accept", handler.accept)
 		r.Post("/nodes/{id}/remove", handler.removeNode)
 		r.Post("/nodes/{id}/open", handler.openNode)
+		r.Post("/nodes/autojoin", handler.autojoin)
 		r.Post("/node/signin", handler.nodeSignIn)
 		r.Get("/signin/qr", handler.signInQR)
 		r.Get("/devices", signIns.list)
