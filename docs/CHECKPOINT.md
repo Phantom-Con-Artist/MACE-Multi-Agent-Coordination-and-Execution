@@ -1,4 +1,4 @@
-# MACE checkpoint, 2026-10-31
+# MACE checkpoint, 2026-10-31 (updated after the second session)
 
 Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds.
 
@@ -9,20 +9,22 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 3. Brand: exact logo SVGs, Archivo, palettes Signal, Ink, Ember, Carbon, Auto (`web/src/theme.css`, `theme.ts`), messenger polish (tile avatars, unread, receipts from read cursors, @ menu, date dividers, triangle tails), decluttered UI.
 4. Agent profiles: name, handle, role (follows into groups unless a group sets one), color profiles, official marks for Claude Code and Muse (Simple Icons, CC0), owner logos in `<state>/avatars/`.
 5. Public site rebuilt with original vector art (hyperbolic tiling, `scripts/hyperbolic-art.py`); raster art removed.
-6. B3 (this commit): per-machine monitor (CPU, memory, disk, load, GPU via nvidia-smi or AMD sysfs) at `/api/v1/metrics`, streamed as `metrics` events, peer proxy `/peers/{id}/metrics`; SVG gauges, sparkline, activity bar chart; compact agent rows on Host.
+6. B3: per-machine monitor (CPU, memory, disk, load, GPU via nvidia-smi or AMD sysfs) at `/api/v1/metrics`, streamed as `metrics` events, peer proxy `/peers/{id}/metrics`; SVG gauges, sparkline, activity bar chart; compact agent rows on Host.
+
+7. Phone review: Activity as a timeline (sentence-case events, MACE instead of internal actors, a mark per event kind, details as a wrapped list), truthful Host empty state, CPU peak, a real wallpaper switch, full-width device rows, MACE in product copy.
+8. Phase 2 commands: `/model`, `/models`, `/cd`, `/new`, `/stop`, `/status`, `/rename`, `/files`, `/help` in private chats via `POST /api/v1/sessions/{id}/command`. Results are `kind: "note"` messages that never reach the agent's transcript. Models from `agy models` (cached 10 min), Claude Code aliases, or free entry (`GET /sessions/{id}/models`). Composer suggests commands, models, and folders; `/new` confirms in a dialog. Verified live with Muse: `/status`, `/cd`, `/new`, and the next turn reporting the new folder.
 
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live).
 - Peer machine monitors with a real second host. Phone hardware, Tailnet, real two-machine Wi-Fi.
-- B3 agent rows were rebuilt but the final screenshot was not reviewed before quota ran out.
+- `/model` with a live Claude Code or Codex turn, and commands on a remote agent through a real second host.
 
 ## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
 
-1. Review Host/Activity screenshots at phone width; Settings polish.
-2. `/` commands in private chats, model switching applied everywhere.
-3. Files: streaming viewer for any size, pdf.js, transfers without the 32 MiB cap.
-4. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
+1. App launching from a visual grid (rest of item 2 in the design status list).
+2. Files: streaming viewer for any size, pdf.js, hex view, transfers without the 32 MiB cap.
+3. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
 
 ## Be careful
 
@@ -30,6 +32,7 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 - Isolated test daemon: port 18091, state in the session scratchpad (gone next session).
 - Tailwind scans class names: avoid utility names such as `ring`, `border`, `shadow` as custom classes (this caused boxed gauges).
 - Go nil slices encode as JSON null; return empty slices to the browser.
+- Browsers cache `index.html`; add a `?v=N` query when reloading after a frontend build.
 - Audit timestamps are Go strings, not ISO; parse with the helper in `web/src/charts.tsx`.
 - No em dashes in product copy (AGENTS.md). Product name: MACE, Multi Agent Coordination and Execution.
 - Live provider calls: agy and muse are free for testing; avoid spending Claude Code or Codex quota.
