@@ -118,6 +118,7 @@ func (h *APIHandler) Health(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds": uint64(time.Since(h.startTime).Seconds()),
 		"node_id":        h.nodeInfo.ID,
 		"role":           h.nodeInfo.Role,
+		"api":            apiVersion,
 	})
 }
 

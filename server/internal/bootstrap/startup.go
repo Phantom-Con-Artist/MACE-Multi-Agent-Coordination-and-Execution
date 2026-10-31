@@ -10,7 +10,8 @@ import (
 	"strconv"
 )
 
-const Version = "0.1.0"
+// Version is set at build time from the repository's VERSION file.
+var Version = "0.1.0-dev"
 
 func DataDir() string {
 	if v := os.Getenv("MACE_HOME"); v != "" {

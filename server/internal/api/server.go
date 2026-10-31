@@ -127,6 +127,45 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		writeJSON(w, 200, map[string]bool{"connected": cfg.AuthSecret == "" || ok})
 	})
 	r.Post("/api/session/sign-out", signIns.signOut)
+	// An app signs in with the one-time code from the hub's sign-in QR, or
+	// by being one of the owner's devices on Tailscale, and keeps the device
+	// credential it gets back. The owner can revoke it like any browser.
+	r.Post("/api/device", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Code string `json:"code"`
+			Name string `json:"name"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
+			http.Error(w, "invalid sign-in", 400)
+			return
+		}
+		if store == nil {
+			http.Error(w, "storage unavailable", 503)
+			return
+		}
+		switch {
+		case body.Code != "":
+			if !handler.spendSignInCode(r.Context(), body.Code) {
+				http.Error(w, "That sign-in code has expired or was already used. Show a new one on your computer.", 401)
+				return
+			}
+		case cfg.AuthSecret == "" || handler.ownerRequest(r):
+		default:
+			http.Error(w, "Scan the sign-in code from MACE on your computer.", 401)
+			return
+		}
+		name := limited(strings.TrimSpace(body.Name), 60)
+		if name == "" {
+			name = "MACE app"
+		}
+		credential, err := signIns.create(r.Context(), name)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		handler.audit("you", "DEVICE_SIGNED_IN", name, map[string]any{"by_code": body.Code != ""})
+		writeJSON(w, 200, map[string]any{"credential": credential, "api": apiVersion, "name": handler.nodeInfo.HostName})
+	})
 
 	// Route bindings
 	r.Get("/health", handler.Health)

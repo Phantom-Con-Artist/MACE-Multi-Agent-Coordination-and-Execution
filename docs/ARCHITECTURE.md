@@ -74,12 +74,12 @@ On the worker node, MACE coordinates multiple autonomous agent instances concurr
 
 | Subsystem | Location | Responsibility |
 |---|---|---|
-| **Tailscale Network** | `internal/network/tailscale` | Manages embedded `tsnet.Server` lifecycle, WireGuard auth, and MagicDNS listeners. |
-| **P2P Transport** | `internal/p2p` | Manages secondary libp2p host lifecycle, peer connection, NAT traversal, and Yamux multiplexers. |
-| **Concurrency Core** | `internal/concurrency` | Implements supervisor trees, worker pools, bounded channels, and graceful shutdown contexts. |
-| **Orchestrator** | `internal/orchestrator` | Coordinates multi-agent task dispatch, order of execution, and dependency resolution. |
-| **Agent Runtime** | `internal/agent` | Spawns, controls, and monitors OS processes and CLI agents with stdin/stdout piping. |
-| **Persistence** | `internal/storage` | Manages SQLite schemas, WAL connections, event logs, and audit trails. |
-| **API & WebSockets** | `internal/api` | Provides local REST and WebSocket endpoints for the frontend dashboard. |
-| **Security Layer** | `internal/security` | Verifies cryptographic identity, signs auth tokens, and validates sandbox boundaries. |
+| **Tailscale Network** | `server/internal/network/tailscale` | Manages embedded `tsnet.Server` lifecycle, WireGuard auth, and MagicDNS listeners. |
+| **P2P Transport** | `server/internal/p2p` | Manages secondary libp2p host lifecycle, peer connection, NAT traversal, and Yamux multiplexers. |
+| **Concurrency Core** | `server/internal/concurrency` | Implements supervisor trees, worker pools, bounded channels, and graceful shutdown contexts. |
+| **Orchestrator** | `server/internal/orchestrator` | Coordinates multi-agent task dispatch, order of execution, and dependency resolution. |
+| **Agent Runtime** | `server/internal/agent` | Spawns, controls, and monitors OS processes and CLI agents with stdin/stdout piping. |
+| **Persistence** | `server/internal/storage` | Manages SQLite schemas, WAL connections, event logs, and audit trails. |
+| **API & WebSockets** | `server/internal/api` | Provides local REST and WebSocket endpoints for the frontend dashboard. |
+| **Security Layer** | `server/internal/security` | Verifies cryptographic identity, signs auth tokens, and validates sandbox boundaries. |
 | **Frontend UI** | `web/` | React single-page application with Zustand, TanStack Query, and Apache ECharts. |

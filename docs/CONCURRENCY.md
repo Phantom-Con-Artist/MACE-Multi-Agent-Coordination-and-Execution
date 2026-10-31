@@ -15,7 +15,7 @@ MACE (*Multi-Agent Coordination and Execution*) is engineered around resilient G
 
 ## 2. Supervisor Tree Architecture
 
-MACE implements an actor-inspired supervisor pattern in `internal/concurrency/supervisor.go`:
+MACE implements an actor-inspired supervisor pattern in `server/internal/concurrency/supervisor.go`:
 
 ```
                        +-------------------+
@@ -42,7 +42,7 @@ MACE implements an actor-inspired supervisor pattern in `internal/concurrency/su
 
 ## 3. Worker Pools & Task Queuing
 
-The worker pool (`internal/concurrency/pool.go`) schedules and limits concurrent agent execution:
+The worker pool (`server/internal/concurrency/pool.go`) schedules and limits concurrent agent execution:
 
 - **Configurable Concurrency Cap**: `MACE_MAX_CONCURRENT_AGENTS` dictates how many active processes can run simultaneously.
 - **Task Prioritization**: Incoming commands are prioritized into:

@@ -19,8 +19,7 @@ coverage.out
 coverage.html
 
 # Go workspace & vendor (if local)
-go.work
-go.work.sum
+# go.work is committed: it lets tools run from the repo root.
 
 # Frontend dependencies & build outputs (React / Vite / Tailwind)
 node_modules/
@@ -92,3 +91,14 @@ bin/
 
 # Code graph built by graphify (rebuilt locally, never committed)
 graphify-out/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+android/.kotlin/
+
+# Private working notes about the codebase (never committed)
+STATUS.local.md

@@ -69,30 +69,44 @@ func deviceName(ua string) string {
 }
 
 func (d *devices) issue(w http.ResponseWriter, r *http.Request) error {
-	secret := newID() + newID()
-	now := time.Now().UTC()
-	dev := Device{ID: "dev_" + newID()[:16], Name: deviceName(r.UserAgent()), Hash: hashHex(secret), TokenHash: hashHex(d.secret)[:16], Created: now, LastSeen: now}
-	if err := d.store.PutDocument(r.Context(), "device", dev.ID, dev); err != nil {
+	credential, err := d.create(r.Context(), deviceName(r.UserAgent()))
+	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: "mace_session", Value: dev.ID + "." + secret, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: int(deviceLifetime.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: "mace_session", Value: credential, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: int(deviceLifetime.Seconds())})
 	return nil
+}
+
+// create records a signed-in device and returns its credential, which a
+// browser keeps as a cookie and an app sends as "Authorization: Device".
+func (d *devices) create(ctx context.Context, name string) (string, error) {
+	secret := newID() + newID()
+	now := time.Now().UTC()
+	dev := Device{ID: "dev_" + newID()[:16], Name: name, Hash: hashHex(secret), TokenHash: hashHex(d.secret)[:16], Created: now, LastSeen: now}
+	if err := d.store.PutDocument(ctx, "device", dev.ID, dev); err != nil {
+		return "", err
+	}
+	return dev.ID + "." + secret, nil
 }
 
 // check validates the session cookie. It returns the device ID, whether the
 // request is authorized, and whether it used a cookie from before devices existed.
 func (d *devices) check(r *http.Request) (string, bool, bool) {
-	cookie, err := r.Cookie("mace_session")
-	if err != nil {
-		return "", false, false
-	}
-	if subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(d.legacyCookie())) == 1 {
-		return "", true, true
+	credential, app := strings.CutPrefix(r.Header.Get("Authorization"), "Device ")
+	if !app {
+		cookie, err := r.Cookie("mace_session")
+		if err != nil {
+			return "", false, false
+		}
+		credential = cookie.Value
+		if subtle.ConstantTimeCompare([]byte(credential), []byte(d.legacyCookie())) == 1 {
+			return "", true, true
+		}
 	}
 	if d.store == nil {
 		return "", false, false
 	}
-	id, secret, ok := strings.Cut(cookie.Value, ".")
+	id, secret, ok := strings.Cut(credential, ".")
 	if !ok {
 		return "", false, false
 	}
@@ -119,7 +133,7 @@ func (d *devices) check(r *http.Request) (string, bool, bool) {
 func (d *devices) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Health and public endpoints are exempt from auth.
-		if r.URL.Path == "/health" || r.URL.Path == "/api/session" || !strings.HasPrefix(r.URL.Path, "/api/") {
+		if r.URL.Path == "/health" || r.URL.Path == "/api/session" || r.URL.Path == "/api/device" || !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -89,9 +89,23 @@ mace maced             # same foreground entry point
 
 Startup waits for the actual HTTP health check before printing success. Occupied ports receive an actionable error; `mace start --port 0` selects a free port. Duplicate starts report the existing server. Stale PID records never authorize signalling an unrelated process. Stop and kill are safe to repeat. Lifecycle locking recovers automatically when a CLI process exits. Restart keeps the saved address, database, and access token. Forced shutdown also stops native descendants.
 
+## Repository
+
+One repository, three parts, one version (the `VERSION` file):
+
+| Folder | What it is |
+|---|---|
+| `server/` | The hub and worker: `maced` (daemon) and `mace` (CLI), in Go. |
+| `web/` | The desktop app, served by the hub. |
+| `android/` | MACE for Android, a native Kotlin app that talks to a hub. |
+| `docs/` | Design and protocol notes; [API.md](docs/API.md) is the frozen client API. |
+| `assets/`, `scripts/` | Branding and verification scripts. |
+
+Releases are tagged `v<version>`; `make dist` packages the hub for one platform.
+
 ## Build and install
 
-Requirements: Go matching go.mod, Node.js/npm, and a Linux host. Browser clients can use other operating systems.
+Requirements: Go matching server/go.mod, Node.js/npm, and a Linux host. Browser clients can use other operating systems. The Android app needs a JDK and the Android SDK (see android/README.md).
 
 ~~~sh
 make build
@@ -109,9 +123,9 @@ MACE_TS_AUTHKEY, MACE_TS_HOSTNAME, and MACE_TS_STATE_DIR configure embedded Tail
 ## Development and verification
 
 ~~~sh
-go test ./...
-go test -race ./internal/api ./internal/agent
-cd web && npm run build
+make test
+cd server && go test -race ./internal/api ./internal/agent
+make android
 ~~~
 
 The Vite development server proxies to port 8080. scripts/check-browser.mjs uses Playwright and starts two isolated test daemons on ports 18080/18081, then cleans them up. Set MACE_PLAYWRIGHT to a Playwright module entry point if it is not installed locally, and MACE_BROWSER to a Chromium executable if necessary. Its diagnostic provider is enabled only by MACE_TEST_MODE=1; it never calls an AI service.
