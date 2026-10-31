@@ -1,6 +1,6 @@
-# MACE checkpoint, 2026-10-31 (updated after the second session)
+# MACE checkpoint, 2026-10-31 (end of the second session)
 
-Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds.
+Paused by the owner to start a new task. Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds. Working tree clean after the last commit.
 
 ## Done (commits on the branch, oldest first)
 
@@ -10,35 +10,47 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 4. Agent profiles: name, handle, role (follows into groups unless a group sets one), color profiles, official marks for Claude Code and Muse (Simple Icons, CC0), owner logos in `<state>/avatars/`.
 5. Public site rebuilt with original vector art (hyperbolic tiling, `scripts/hyperbolic-art.py`); raster art removed.
 6. B3: per-machine monitor (CPU, memory, disk, load, GPU via nvidia-smi or AMD sysfs) at `/api/v1/metrics`, streamed as `metrics` events, peer proxy `/peers/{id}/metrics`; SVG gauges, sparkline, activity bar chart; compact agent rows on Host.
-
-7. Phone review: Activity as a timeline (sentence-case events, MACE instead of internal actors, a mark per event kind, details as a wrapped list), truthful Host empty state, CPU peak, a real wallpaper switch, full-width device rows, MACE in product copy.
-8. Phase 2 commands: `/model`, `/models`, `/cd`, `/new`, `/stop`, `/status`, `/rename`, `/files`, `/help` in private chats via `POST /api/v1/sessions/{id}/command`. Results are `kind: "note"` messages that never reach the agent's transcript. Models from `agy models` (cached 10 min), Claude Code aliases, or free entry (`GET /sessions/{id}/models`). Composer suggests commands, models, and folders; `/new` confirms in a dialog. Verified live with Muse: `/status`, `/cd`, `/new`, and the next turn reporting the new folder.
-9. Host apps as a launcher grid grouped by desktop category, with monogram tiles in the avatar color profiles (`category` on `/api/v1/apps`).
+7. Phone review (`4242ca6`): Activity as a timeline (sentence-case events, MACE instead of internal actors, a mark per event kind, details as a wrapped list), truthful Host empty state, CPU peak, a real wallpaper switch, full-width device rows, MACE in product copy.
+8. Phase 2 commands (`67c37e3`): `/model`, `/models`, `/cd`, `/new`, `/stop`, `/status`, `/rename`, `/files`, `/help` in private chats via `POST /api/v1/sessions/{id}/command`. Results are `kind: "note"` messages kept out of the agent's transcript. Models from `agy models` (cached 10 min), Claude Code aliases, or free entry (`GET /sessions/{id}/models`). Composer suggests commands, models, and folders; `/new` confirms in a dialog. Verified live with Muse.
+9. Host apps as a launcher grid (`f9f55ed`), grouped by desktop category, monogram tiles in the avatar color profiles (`category` on `/api/v1/apps`).
+10. SIGHUP fix (`b32cf93`): maced logs and ignores hangups, so closing the terminal that ran `mace start` no longer kills it silently; `mace status` reports an unexpected exit when a PID record is left behind.
+11. Hub and worker architecture recorded (`6c79195`): docs/DESIGN-HUB-WORKER.md.
+12. Hub and worker step 1, records (`c4e940b`): `internal/records` (SHA-256 of a canonical v1 envelope, Ed25519 signature, per-node chain via `prev`, `seen` heads, hybrid logical clock, causal `Order`, `VerifyChain`), schema v4 (`records`, `heads`), node key at `<state>/node.key` (0600). Every message is also written as a record and carries its ID in `record`; earlier messages backfill once at start. Checked on a copy of the owner's database: 20 messages, 6 conversations, backup taken, no duplicates on restart.
+13. Hub and worker step 2, worker service (`0a7e642`): `mace setup [--port] [--host] [--no-linger]`, `mace setup --remove`. User unit captures PATH, `Restart=on-failure`, token kept out of the journal under systemd. Checked on real systemd with an isolated unit (`MACE_SERVICE_NAME=mace-test`): restarted 7 s after a forced kill, all four CLIs detected, removed cleanly.
 
 ## Not yet verified
 
-- Claude Code and Codex adapters live (agy and muse were verified live).
-- Peer machine monitors with a real second host. Phone hardware, Tailnet, real two-machine Wi-Fi.
-- Launching an app from the new grid (not clicked, to avoid opening windows on the owner's desktop).
-- `/model` with a live Claude Code or Codex turn, and commands on a remote agent through a real second host.
+- Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
+- Linger (start at boot before login); not run because it changes a system setting.
+- Anything across real machines: peer monitors, remote commands, Tailnet, phone hardware, two-machine Wi-Fi.
+- Launching an app from the grid (not clicked, to avoid opening windows on the owner's desktop).
 
-## Architecture decision (2026-10-31)
+## Next, when this work resumes
 
-Hub and worker nodes, every node stores its own data, records named by content hash with per-node chains. See docs/DESIGN-HUB-WORKER.md. Its build order comes before the remaining phase 3 to 6 items, which it partly absorbs. Step 1 (records) is done and was checked on a copy of the owner's real database (20 messages, 6 conversations, backup taken, no duplicates on restart). Step 2 (worker service, `mace setup`) is done and was checked on real systemd with an isolated unit. Next: step 3, joining (node keys, `mace join`, QR code, discovery over Tailscale).
+Follow the build order in docs/DESIGN-HUB-WORKER.md:
 
-## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
+3. Joining: node keys exchanged with `mace join` or a QR code, discovery over Tailscale. Needs the owner to run `sudo tailscale up` (logged out on 2026-10-31); otherwise only localhost protocol tests are possible and must be reported as such.
+4. Hub: head comparison, chain walking, read-only caches, merged views, routing actions to owner nodes, offline gaps in the interface. Switch the interface from messages to records here.
+5. Chunked, content-addressed files and transfers (absorbs the transfer part of phase 3).
+6. `mace-server start` with the Tailscale HTTPS link, QR sign-in, home-screen install, notifications, and a hub switcher on the phone.
 
-1. Files: streaming viewer for any size, pdf.js, hex view, transfers without the 32 MiB cap.
-2. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
+After that: the rest of phase 3 (streaming viewer, pdf.js, hex view), the animated CLI (B5), power (phase 5), Live View (phase 6).
+
+## Owner's environment
+
+- Installed `mace` and `maced` in `~/.local/bin` date from 00:11 on 2026-10-31 and predate the SIGHUP fix and everything after. `make install` then `mace setup` switches the owner to this build; not done, the owner has not asked.
+- The owner's server on port 8080 was stopped at the time of writing (it had died from the SIGHUP bug).
+- Firewall zone FedoraWorkstation allows TCP 1025 to 65535 on Wi-Fi (`wlp2s0`, 192.168.0.6). `rain0` (10.77.0.1) is a VPN.
 
 ## Be careful
 
-- Never run `bin/mace start|restart|stop` without MACE_HOME, MACE_PID_FILE, MACE_LOG_FILE pointing at a scratch folder; otherwise it acts on the owner's live server on port 8080. The owner's server is still running an early phase 0 build from a mistaken restart; the owner was told and has not asked to change it.
-- Isolated test daemon: port 18091, state in the session scratchpad (gone next session).
-- Tailwind scans class names: avoid utility names such as `ring`, `border`, `shadow` as custom classes (this caused boxed gauges).
+- Never run `bin/mace start|restart|stop|setup` without MACE_HOME, MACE_PID_FILE, MACE_LOG_FILE pointing at a scratch folder (and MACE_SERVICE_NAME for setup); otherwise it acts on the owner's live install.
+- Isolated test daemons used ports 18091 to 18093 with state in the session scratchpad (gone next session).
+- Tailwind scans class names: avoid utility names such as `ring`, `border`, `shadow` as custom classes.
 - Go nil slices encode as JSON null; return empty slices to the browser.
 - Browsers cache `index.html`; add a `?v=N` query when reloading after a frontend build.
 - Audit timestamps are Go strings, not ISO; parse with the helper in `web/src/charts.tsx`.
+- Records are immutable: never put local, changing state (delivery, seq) in a record body. Changing the envelope or encoding needs a new record version.
 - No em dashes in product copy (AGENTS.md). Product name: MACE, Multi Agent Coordination and Execution.
 - Live provider calls: agy and muse are free for testing; avoid spending Claude Code or Codex quota.
 - The owner wants minimal visible controls, a messenger-grade feel, vector art only, and decisions explained briefly.
