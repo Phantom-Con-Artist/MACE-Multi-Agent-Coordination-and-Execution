@@ -250,6 +250,8 @@ fun ChatScreen(
         if (state.messages.lastOrNull()?.sender == "you" || list.firstVisibleItemIndex <= 1) list.animateScrollToItem(0)
     }
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > 2 } }
+    // @handle in a message takes the color of the agent it names.
+    val mentionColors = state.members.filter { it.handle.isNotEmpty() }.associate { it.handle.lowercase() to memberColor(it.id) } + ("all" to MaterialTheme.colorScheme.primary)
 
     fun reply(m: Message) {
         val name = if (m.sender == "you") "You" else memberOf(m.sender)?.name ?: "Agent"
@@ -354,7 +356,7 @@ fun ChatScreen(
                                 val day = local(m.at)?.toLocalDate()
                                 if (day != null && day != prev?.let { local(it.at)?.toLocalDate() }) DayChip(dayLabel(day))
                                 if (m.seq > 0 && m.seq == state.firstUnread && unread > 0) UnreadMarker(unread)
-                                MessageRow(m, startsRun(prev, m), state, bubbleMax, memberOf, roleOf, media, observe, actions.onOpenFile, onRetry = actions.onRetry, onReply = { reply(m) })
+                                MessageRow(m, startsRun(prev, m), state, bubbleMax, memberOf, roleOf, media, observe, mentionColors, actions.onOpenFile, onRetry = actions.onRetry, onReply = { reply(m) })
                             }
                         }
                     }
@@ -510,6 +512,7 @@ private fun MessageRow(
     roleOf: (String) -> String,
     media: MediaLoader,
     observe: Boolean,
+    mentionColors: Map<String, Color>,
     onOpenFile: (String) -> Unit,
     onRetry: (Message) -> Unit,
     onReply: () -> Unit,
@@ -597,7 +600,7 @@ private fun MessageRow(
                         }
                         if (observe && m.activity.isNotEmpty()) StepsDisclosure(m.activity, ink)
                         Box {
-                            Body(m, reserve, ink, bubbleMax, media, onOpenFile)
+                            Body(m, reserve, ink, bubbleMax, media, onOpenFile, mentionColors)
                             // On a picture without a caption the time sits on a dark scrim.
                             val onPicture = m.text.isBlank() && (kindOf(m.file) == FileKind.Image || kindOf(m.file) == FileKind.Video)
                             val metaInk = if (onPicture) Color.White else ink
@@ -634,7 +637,7 @@ private fun MessageRow(
 private val quoteLine = Regex("""^> ([^:\n]{1,80}): (.*)$""")
 
 @Composable
-private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit) = Column {
+private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit, mentionColors: Map<String, Color>) = Column {
     var text = m.text
     quoteLine.find(text.lineSequence().firstOrNull().orEmpty())?.let { q ->
         text = text.substringAfter('\n', "")
@@ -648,7 +651,7 @@ private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: Medi
     }
     val captioned = text.isNotBlank()
     if (m.file.isNotEmpty()) FileCard(m.file, ink, width, media, onOpenFile)
-    if (captioned) Box(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) { Markdown(text, ink, reserve = reserve) }
+    if (captioned) Box(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) { Markdown(text, ink, reserve = reserve, mentions = mentionColors) }
     else if (kindOf(m.file) == FileKind.Other || kindOf(m.file) == FileKind.Folder) {
         Text(buildAnnotatedString { withStyle(SpanStyle(color = Color.Transparent, fontSize = 11.sp)) { append(reserve) } }, modifier = Modifier.padding(horizontal = 4.dp))
     }
@@ -668,58 +671,85 @@ private fun Ticks(m: Message, state: ChatState, ink: Color) {
     }
 }
 
-/** In observe view, the steps an agent took for a reply: collapsed to a count, open to the list. */
+/** In observe view, the steps an agent took for a reply: a symmetric box, open by default. */
 @Composable
 private fun StepsDisclosure(steps: List<io.github.phantomconartist.mace.data.Step>, ink: Color) {
     var open by remember { mutableStateOf(true) }
     var all by remember { mutableStateOf(false) }
-    Column(Modifier.padding(horizontal = 4.dp, vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.07f)).clickable { open = !open }.padding(horizontal = 8.dp, vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Build, null, tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-            Spacer(Modifier.width(6.dp))
-            val edits = steps.count { it.kind == "edit" || it.kind == "write" }
-            Text(listOfNotNull("${steps.size} steps", if (edits > 0) "$edits file edits" else null).joinToString(" · "), style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = 0.75f))
-            Spacer(Modifier.weight(1f, fill = false).width(8.dp))
-            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, if (open) "Hide steps" else "Show steps", tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+    val edits = steps.count { it.kind == "edit" || it.kind == "write" }
+    Column(
+        Modifier.padding(horizontal = 4.dp, vertical = 3.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(ink.copy(alpha = 0.07f)),
+    ) {
+        Row(Modifier.fillMaxWidth().height(36.dp).clickable { open = !open }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(StepIcon), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Build, null, tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(16.dp)) }
+            Spacer(Modifier.width(StepGap))
+            Text(listOfNotNull("${steps.size} steps", if (edits > 0) "$edits file edits" else null).joinToString(" · "), style = MaterialTheme.typography.labelLarge,
+                color = ink.copy(alpha = 0.8f), maxLines = 1, modifier = Modifier.weight(1f))
+            Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, if (open) "Hide steps" else "Show steps", tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(StepIcon))
         }
         AnimatedVisibility(open) {
-            Column {
+            Column(Modifier.padding(bottom = 6.dp)) {
                 StepList(if (all) steps else steps.takeLast(6), ink)
-                if (!all && steps.size > 6) Text("Show all ${steps.size} steps", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { all = true }.padding(vertical = 4.dp))
-            }
-        }
-    }
-}
-
-/** Tool calls and file edits, one line each, with what they touched. */
-@Composable
-private fun StepList(steps: List<io.github.phantomconartist.mace.data.Step>, ink: Color) {
-    Column(Modifier.padding(top = 4.dp, bottom = 4.dp)) {
-        steps.forEach { st ->
-            Row(Modifier.padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
-                Icon(
-                    when (st.kind) {
-                        "edit", "write" -> Icons.Rounded.Edit
-                        "read" -> Icons.Rounded.Description
-                        "command", "shell", "exec" -> Icons.Rounded.Terminal
-                        "search" -> Icons.Rounded.Search
-                        else -> Icons.Rounded.Build
-                    },
-                    null, tint = if (st.state == "failed") MaterialTheme.colorScheme.error else ink.copy(alpha = 0.6f), modifier = Modifier.padding(top = 2.dp).size(14.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Column {
-                    Text(plainStep(st.title).ifEmpty { st.kind }, style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.9f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (st.detail.isNotBlank()) Text(st.detail.trim(), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp, color = ink.copy(alpha = 0.6f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                if (!all && steps.size > 6) {
+                    Text("Show all ${steps.size} steps", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth().clickable { all = true }.padding(start = 10.dp + StepIcon + StepGap, top = 4.dp, bottom = 4.dp))
                 }
             }
         }
     }
 }
 
+private val StepIcon = 24.dp
+private val StepGap = 8.dp
+
+/** Tool calls and file edits: every step one line of the same height, icon column on the left. */
+@Composable
+private fun StepList(steps: List<io.github.phantomconartist.mace.data.Step>, ink: Color) {
+    Column(Modifier.fillMaxWidth()) {
+        steps.forEach { st ->
+            Row(Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(StepIcon), contentAlignment = Alignment.Center) {
+                    Icon(
+                        when (st.kind) {
+                            "edit", "write" -> Icons.Rounded.Edit
+                            "read" -> Icons.Rounded.Description
+                            "command", "shell", "exec" -> Icons.Rounded.Terminal
+                            "search" -> Icons.Rounded.Search
+                            else -> Icons.Rounded.Build
+                        },
+                        null, tint = if (st.state == "failed") MaterialTheme.colorScheme.error else ink.copy(alpha = 0.65f), modifier = Modifier.size(16.dp),
+                    )
+                }
+                Spacer(Modifier.width(StepGap))
+                Text(stepLabel(st), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, color = ink.copy(alpha = 0.85f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+private val commandField = Regex(""""command"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+private val pathField = Regex(""""(?:file_?path|path|file|filename|target_file)"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+private val skillName = Regex("""name="([^"]+)"""")
+
+/**
+ * One clean line for a step. Some CLIs report raw JSON or XML as a step's
+ * title, such as "{" or "<read-skill-result …>"; those are read for the
+ * command, file, or skill they name.
+ */
+fun stepLabel(st: io.github.phantomconartist.mace.data.Step): String {
+    val raw = (st.title + "\n" + st.detail)
+    val title = st.title.replace("`", "").replace(Regex("""\s+"""), " ").trim()
+    val messy = title.isEmpty() || title.startsWith("{") || title.startsWith("[") || title.startsWith("<") || title.startsWith("\"")
+    if (!messy) return title
+    if (title.startsWith("<read-skill-result")) skillName.find(title)?.let { return "Read skill " + it.groupValues[1] }
+    commandField.find(raw)?.let { return "Ran " + it.groupValues[1].replace("\\n", " ").replace("\\\"", "\"").replace(Regex("""\s+"""), " ").trim() }
+    pathField.find(raw)?.let { return (if (st.kind == "edit" || st.kind == "write") "Edited " else "Read ") + it.groupValues[1].substringAfterLast('/') }
+    return when (st.kind) { "command" -> "Ran a command"; "read" -> "Read a file"; "edit", "write" -> "Edited a file"; "search" -> "Searched"; else -> "Used a tool" }
+}
+
 /** A step's title without Markdown backticks, which read as stray accents in italics. */
-private fun plainStep(title: String) = title.replace("`", "").trim()
+private fun plainStep(title: String) = title.replace("`", "").replace(Regex("""\s+"""), " ").trim()
 
 /** The first phrase of a role, short enough to sit beside a name, as a messenger shows a number. */
 fun shortRole(role: String): String {

@@ -80,9 +80,9 @@ private fun blocks(source: String): List<Block> {
     return out
 }
 
-private val inline = Regex("""\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)""")
+private val inline = Regex("""\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)|(?<![\w@])@([A-Za-z][\w.-]*[A-Za-z0-9])""")
 
-private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspecified): AnnotatedString = buildAnnotatedString {
+private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspecified, mentions: Map<String, Color> = emptyMap()): AnnotatedString = buildAnnotatedString {
     var at = 0
     for (m in inline.findAll(text)) {
         append(text.substring(at, m.range.first))
@@ -94,7 +94,10 @@ private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspeci
         val bold2 = g[5]
         val italic = g[6]
         val italic2 = g[7]
+        val mention = g[8]
         when {
+            // @handle in the color of the agent it names; @all and unknown handles in the link color.
+            mention.isNotEmpty() -> withStyle(SpanStyle(color = mentions[mention.lowercase()] ?: linkColor, fontWeight = FontWeight.SemiBold)) { append("@" + mention) }
             // Web links open in the browser; file links show their name.
             label.isNotEmpty() && (url.startsWith("http://") || url.startsWith("https://")) ->
                 withLink(androidx.compose.ui.text.LinkAnnotation.Url(url, androidx.compose.ui.text.TextLinkStyles(SpanStyle(color = linkColor, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))) { append(label) }
@@ -114,12 +117,12 @@ private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspeci
  * ends in code or a quote puts the time on a line of its own.
  */
 @Composable
-fun Markdown(text: String, color: Color, modifier: Modifier = Modifier, reserve: String = "") {
+fun Markdown(text: String, color: Color, modifier: Modifier = Modifier, reserve: String = "", mentions: Map<String, Color> = emptyMap()) {
     val parsed = remember(text) { blocks(text) }
     val codeBg = color.copy(alpha = 0.09f)
     val link = MaterialTheme.colorScheme.primary
     fun body(b: String, last: Boolean): AnnotatedString {
-        val s = styled(b, codeBg, link)
+        val s = styled(b, codeBg, link, mentions)
         if (!last || reserve.isEmpty()) return s
         return buildAnnotatedString { append(s); withStyle(SpanStyle(color = Color.Transparent, fontSize = 11.sp)) { append(reserve) } }
     }
@@ -131,7 +134,7 @@ fun Markdown(text: String, color: Color, modifier: Modifier = Modifier, reserve:
                     is Block.Text -> Text(body(b.text, last), style = MaterialTheme.typography.bodyLarge, color = color)
                     is Block.Heading -> Text(body(b.text, last), style = MaterialTheme.typography.titleMedium, color = color)
                     is Block.Quote -> Text(
-                        styled(b.text, codeBg, link),
+                        styled(b.text, codeBg, link, mentions),
                         style = MaterialTheme.typography.bodyLarge,
                         color = color.copy(alpha = 0.75f),
                         modifier = Modifier.padding(start = 4.dp).background(codeBg, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
