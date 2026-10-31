@@ -198,7 +198,7 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 		if p.Mode == "team" && other == p.Lead {
 			lead = " LEAD."
 		}
-		fmt.Fprintf(&header, "- %s (@%s).%s %s\n", h.memberName(ctx, other), handles[other], lead, role)
+		fmt.Fprintf(&header, "- %s (@%s).%s %s. %s\n", h.memberName(ctx, other), handles[other], lead, role, h.capabilities(ctx, other))
 	}
 	header.WriteString("HOW THIS TEAM WORKS: you are coworkers on the owner's request, all able to work at once. Split the work by what each of you is best placed to do, like a real team. Roles are not fixed: when a piece of work has no owner, claim it by starting a message with [role: what you take on], and claim again when the task shifts. Owner-assigned roles come first. Don't redo work someone else claimed; hand off with @handle; never speak for a coworker. Stay inside the request and your working folder; don't inspect MACE itself or unrelated processes unless the owner asks. If the owner's message is just chat, answer in a line and stop.\n")
 	header.WriteString(chatStyle(p.Tone))
@@ -209,9 +209,9 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 	}
 	if p.Mode == "team" {
 		if member == p.Lead {
-			header.WriteString("YOU ARE THE LEAD of this team. The owner's messages come to you unless they @mention someone else. Plan the work, assign and change roles, direct coworkers with @handle, answer their questions, check their results, and keep the owner posted in a line or two. Keep your own turns short and delegate heavy work. To stop a coworker and give new direction, start your message with [redirect] and @mention them. When every part works together, start your message with [done] and one line of proof; only your [done] finishes the task.\n")
+			header.WriteString("YOU ARE THE LEAD of this team. The owner's messages come to you unless they @mention someone else. Work in three steps. 1) Brief: before assigning anything, confirm with the owner in one short message the goal, scope, and what done means; skip this when the request already makes them clear. 2) Divide: post a [plan] that splits the work into parts, each with one owner chosen by what that coworker's CLI, model, and machine are best at, plus the shared contracts (files, interfaces) the parts must agree on. 3) Conquer: let them work in parallel, then integrate and verify. Throughout, assign and change roles, direct coworkers with @handle, answer their questions, check their results, and keep the owner posted in a line or two. Keep your own turns short and delegate heavy work. To stop a coworker and give new direction, start your message with [redirect] and @mention them. When every part works together, start your message with [done] and one line of proof; only your [done] finishes the task.\n")
 		} else {
-			fmt.Fprintf(&header, "@%s is the lead of this team (also reachable as @lead). Take direction from the lead and send questions, progress, and results to @lead. If the owner @mentions you, answer the owner directly; the lead sees it too. [done] marks your own part finished, not the whole task.\n", handles[p.Lead])
+			fmt.Fprintf(&header, "@%s is the lead of this team (also reachable as @lead). Do not start on the owner's request until the lead assigns you a part; then build exactly that part against the lead's plan. Send questions, progress, and results to @lead. If the owner @mentions you, answer the owner directly; the lead sees it too. [done] marks your own part finished, not the whole task.\n", handles[p.Lead])
 		}
 	}
 	switch p.Mode {
@@ -326,4 +326,30 @@ func (h *APIHandler) available(ctx context.Context, id string) bool {
 	}
 	p, e := h.supervisor.GetAgent(id)
 	return e == nil && p != nil && !p.Status.IsTerminal()
+}
+
+// capabilities describes what a member runs on, so a lead can divide work.
+func (h *APIHandler) capabilities(ctx context.Context, id string) string {
+	var s Session
+	host, _ := os.Hostname()
+	if peer, _, remote := strings.Cut(id, "::"); remote {
+		h.store.Document(ctx, "remote-session", id, &s)
+		var p Peer
+		if h.store.Document(ctx, "peer", peer, &p) == nil {
+			host = p.Name
+		}
+	} else {
+		h.store.Document(ctx, "session", id, &s)
+	}
+	cli := s.Provider
+	for _, p := range providers() {
+		if p.ID == s.Provider {
+			cli = p.Name
+		}
+	}
+	model := s.Model
+	if model == "" {
+		model = "CLI default model"
+	}
+	return fmt.Sprintf("Runs %s, %s, on %s, in %s", cli, model, host, s.Directory)
 }

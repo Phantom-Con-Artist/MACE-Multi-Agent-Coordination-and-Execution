@@ -73,3 +73,17 @@ func TestTheLeadMustBeAMember(t *testing.T) {
 		t.Fatalf("a goal group needs a lead, got %d", c)
 	}
 }
+
+func TestLeadBriefsThenDividesByCapability(t *testing.T) {
+	tm := newTeam(t, "ari", "bo")
+	room := leadGroup(t, tm, "ari", "ari", "bo")
+	lead, worker := header(t, tm, room, "ari"), header(t, tm, room, "bo")
+	for _, want := range []string{"Brief:", "Divide:", "[plan]", "Runs Antigravity"} {
+		if !strings.Contains(lead, want) {
+			t.Errorf("the lead's turn is missing %q:\n%s", want, lead)
+		}
+	}
+	if !strings.Contains(worker, "until the lead assigns you a part") {
+		t.Errorf("workers should wait for an assignment:\n%s", worker)
+	}
+}
