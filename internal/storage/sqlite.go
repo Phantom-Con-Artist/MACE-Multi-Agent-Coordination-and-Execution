@@ -115,6 +115,14 @@ var migrations = []string{
 	CREATE INDEX idx_messages_room_seq ON messages(room, seq);
 	INSERT INTO messages(id, room, data) SELECT id, substr(kind, 9), data FROM documents WHERE kind LIKE 'message:%' ORDER BY rowid;
 	DELETE FROM documents WHERE kind LIKE 'message:%';`,
+	// Records are hashed, signed, append-only entries chained per node and
+	// conversation (docs/DESIGN-HUB-WORKER.md). ref ties a record to the
+	// message it was written for, so writing one is idempotent. heads holds
+	// the newest record of each node's chain in each conversation.
+	`CREATE TABLE records (id TEXT PRIMARY KEY, node TEXT NOT NULL, conversation TEXT NOT NULL, wall INTEGER NOT NULL, count INTEGER NOT NULL, prev TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL, cached INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
+	CREATE INDEX idx_records_conversation ON records(conversation, wall, count);
+	CREATE UNIQUE INDEX idx_records_ref ON records(node, ref) WHERE ref != '';
+	CREATE TABLE heads (node TEXT NOT NULL, conversation TEXT NOT NULL, head TEXT NOT NULL, PRIMARY KEY(node, conversation));`,
 }
 
 const baseSchema = `

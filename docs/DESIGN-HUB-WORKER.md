@@ -1,6 +1,6 @@
 # MACE design: hub and worker nodes
 
-Status: direction approved by the owner on 2026-10-31. Not yet built. Date: 2026-10-31.
+Status: direction approved by the owner on 2026-10-31. Step 1 (records) built. Date: 2026-10-31.
 
 This document replaces the peer model (one host connecting to another with a URL and token) and the host-facing parts of phase 4 in [DESIGN-REMOTE-COWORKERS.md](DESIGN-REMOTE-COWORKERS.md). Everything else in that document still applies. AGENTS.md constraints still apply.
 
@@ -108,7 +108,7 @@ Existing data is migrated once: each current message becomes a record owned by t
 
 ## Build order
 
-1. Records: canonical envelope, hashing, signing, hybrid logical clock, per-node chains, migration of existing data. Tests for hash stability, ordering under clock skew, and chain verification.
+1. Records: canonical envelope, hashing, signing, hybrid logical clock, per-node chains, migration of existing data. Tests for hash stability, ordering under clock skew, and chain verification. Done: `internal/records`, schema v4 (`records`, `heads`), node key at `<state>/node.key`. Every message is also written as a record and carries its ID in `record`; earlier messages are backfilled once at start. The interface still reads messages until step 4.
 2. Worker service: systemd user unit, linger, `mace setup`.
 3. Joining: node keys, `mace join`, QR code, discovery over Tailscale.
 4. Hub: head comparison, chain walking, caches, merged views, routing actions to owners, offline gaps in the interface.

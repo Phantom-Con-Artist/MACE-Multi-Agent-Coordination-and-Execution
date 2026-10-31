@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"mace/internal/agent"
+	"mace/internal/records"
 	"mace/internal/storage"
 	"mace/pkg/protocol"
 	"net/http"
@@ -25,6 +26,7 @@ type APIHandler struct {
 	presence    presence
 	sendMu      sync.Mutex
 	events      *hub
+	records     *records.Log
 	// sched guards the per-agent inboxes and per-room run state.
 	sched     sync.Mutex
 	runSaveMu sync.Mutex
@@ -83,6 +85,7 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 	}
 	if store != nil {
 		h.ensureHandles(context.Background())
+		h.records = openRecords(store)
 	}
 	return h
 }

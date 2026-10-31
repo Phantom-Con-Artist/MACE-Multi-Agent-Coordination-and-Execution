@@ -131,3 +131,37 @@ func (s *Store) Inbox(ctx context.Context, seen map[string]int64) ([]InboxRow, e
 	}
 	return out, nil
 }
+
+// EachMessage visits every message in sequence order.
+func (s *Store) EachMessage(ctx context.Context, visit func(room string, m StoredMessage) error) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT seq, room, data FROM messages ORDER BY seq`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		room string
+		m    StoredMessage
+	}
+	list := []row{}
+	for rows.Next() {
+		var r row
+		var data string
+		if err := rows.Scan(&r.m.Seq, &r.room, &data); err != nil {
+			rows.Close()
+			return err
+		}
+		r.m.Data = json.RawMessage(data)
+		list = append(list, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Visiting after the rows close lets visit write to the database.
+	for _, r := range list {
+		if err := visit(r.room, r.m); err != nil {
+			return err
+		}
+	}
+	return nil
+}

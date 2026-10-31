@@ -37,6 +37,9 @@ type Message struct {
 	Wake        bool              `json:"wake,omitempty"`
 	Activity    []Activity        `json:"activity,omitempty"`
 	Delivery    map[string]string `json:"delivery"`
+	// Record is the ID of this message's record: the SHA-256 of its signed
+	// envelope, used to fetch it from the node that wrote it.
+	Record string `json:"record,omitempty"`
 }
 
 func newID() string { b := make([]byte, 16); rand.Read(b); return hex.EncodeToString(b) }

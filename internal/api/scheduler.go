@@ -676,6 +676,7 @@ func (h *APIHandler) postMessage(ctx context.Context, m *Message) (int64, error)
 		return 0, err
 	}
 	m.Seq = seq
+	h.recordMessage(ctx, m)
 	h.events.publish("message", m)
 	return seq, nil
 }
