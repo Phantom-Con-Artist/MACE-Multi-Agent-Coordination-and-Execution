@@ -163,12 +163,24 @@ func main() {
 	// 6. Handle Shutdown Signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	// A hangup arrives when the terminal or desktop session that ran mace
+	// start closes. The server is meant to outlive it, and an unhandled SIGHUP
+	// would end it silently, so it is logged and ignored.
+	hupCh := make(chan os.Signal, 1)
+	signal.Notify(hupCh, syscall.SIGHUP)
 
-	select {
-	case sig := <-sigCh:
-		log.Printf("[MACE] Caught signal %v, initiating graceful shutdown...", sig)
-	case err := <-group.Errors():
-		log.Printf("[MACE] Unexpected service error: %v, shutting down...", err)
+wait:
+	for {
+		select {
+		case <-hupCh:
+			log.Printf("[MACE] Ignored a hangup signal; the terminal that started MACE may have closed. Use mace stop to stop.")
+		case sig := <-sigCh:
+			log.Printf("[MACE] Caught signal %v, initiating graceful shutdown...", sig)
+			break wait
+		case err := <-group.Errors():
+			log.Printf("[MACE] Unexpected service error: %v, shutting down...", err)
+			break wait
+		}
 	}
 
 	cancel()

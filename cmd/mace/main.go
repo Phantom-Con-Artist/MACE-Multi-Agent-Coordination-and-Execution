@@ -410,6 +410,12 @@ func (c settings) call(method, path string, timeout time.Duration, out any) erro
 func (c settings) status() error {
 	pid := c.pid()
 	if !c.owns(pid) {
+		// stop removes the PID record, so one left behind means the server
+		// ended without a clean shutdown.
+		if r := c.info(); pid > 0 && r.PID == pid {
+			return fmt.Errorf("MACE stopped unexpectedly: PID %d, started %s, exited without a clean shutdown. See mace logs, then run mace start",
+				pid, r.Started.Local().Format(time.RFC1123))
+		}
 		return errors.New("MACE is stopped; run mace start")
 	}
 	r := c.info()
