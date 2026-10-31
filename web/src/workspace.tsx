@@ -114,7 +114,7 @@ type Msg = {
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
-type Policy = { mode: string; goal: string; limit: number; tone?: string };
+type Policy = { mode: string; goal: string; limit: number; tone?: string; lead?: string };
 type Run = { id: string; status: string; replies: number; error?: string; active_member?:string; active_members?: string[] };
 // Messages arrive from the stream and from paged loads; keep one copy of each,
 // in conversation order.
@@ -2464,11 +2464,41 @@ export default function Workspace() {
                     setPolicy({ ...policy, mode: e.target.value })
                   }
                 >
-                  <option value="reply">Reply limit</option>
-                  <option value="goal">Goal oriented</option>
-                  <option value="continuous">Until done</option>
+                  {room ? (
+                    <>
+                      <option value="team">Goal: a lead runs the team until done</option>
+                      <option value="reply">Free: casual chat</option>
+                      {(policy.mode === "goal" || policy.mode === "continuous") && (
+                        <option value={policy.mode}>{policy.mode === "goal" ? "Goal oriented (older)" : "Until done (older)"}</option>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <option value="reply">Reply limit</option>
+                      <option value="goal">Goal oriented</option>
+                    </>
+                  )}
                 </select>
               </label>
+              {room && policy.mode === "team" && (
+                <label>
+                  Lead
+                  <select
+                    required
+                    value={policy.lead || ""}
+                    onChange={(e) => setPolicy({ ...policy, lead: e.target.value })}
+                  >
+                    <option value="" disabled>
+                      Choose the lead
+                    </option>
+                    {room.members.map((id) => (
+                      <option key={id} value={id}>
+                        {name(id)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {room && (
                 <label>
                   Texting style
@@ -2490,7 +2520,7 @@ export default function Workspace() {
                   />
                 </label>
               )}
-              {policy.mode !== "continuous" && (
+              {policy.mode !== "continuous" && policy.mode !== "team" && (
                 <label>
                   Maximum agent replies
                   <input
@@ -2505,7 +2535,9 @@ export default function Workspace() {
                 </label>
               )}
               <p>
-                {policy.mode === "continuous"
+                {policy.mode === "team"
+                  ? "Your messages go to the lead unless you @mention someone. The lead plans, assigns roles, directs the others, and says done when everything works. Agents reach the lead with @lead."
+                  : policy.mode === "continuous"
                   ? "After your message, agents keep working together until one reports it done, they run out of things to add, or you step in. They never start on their own."
                   : policy.mode === "goal"
                     ? "Stops on an agent completion report or the reply budget. Review its evidence."
