@@ -1595,3 +1595,33 @@
     max-width: none;
   }
 }
+
+/* Command results: a quiet note from MACE, kept out of the agent's view. */
+.app .command-note {
+  display: flex;
+  justify-content: center;
+  margin: 12px auto;
+  max-width: min(34rem, 92%);
+}
+.app .command-note .message-text {
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.7;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.app .command-note > small {
+  display: none;
+}
+.app .command-menu .all-icon {
+  background: var(--soft);
+  color: var(--text);
+}
+.app .command-menu li[aria-selected="true"] .all-icon {
+  background: var(--accent);
+  color: var(--accent-ink);
+}

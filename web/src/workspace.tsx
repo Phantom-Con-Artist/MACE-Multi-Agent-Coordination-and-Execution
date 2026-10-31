@@ -22,6 +22,9 @@ function PeerMachine({ id, name }: { id: string; name: string }) {
 import {
   Avatar,
   PlainWithMentions,
+  parseCommand,
+  useCommandMenu,
+  type CommandOption,
   dayLabel,
   listTime,
   plainPreview,
@@ -74,6 +77,9 @@ import {
   Check,
   CheckCheck,
   AtSign,
+  Slash,
+  FolderOpen,
+  Cpu,
 } from "lucide-react";
 type Agent = {
   id: string;
@@ -342,6 +348,49 @@ export default function Workspace() {
       composer.current?.focus();
       composer.current?.setSelectionRange(at, at);
       setCaret(at);
+    });
+  };
+  // Commands work in private chats only; groups keep / as plain text.
+  const commandAgent = !room && selected ? all.find((a) => a.id === selected) : undefined;
+  const commands = useCommandMenu(
+    draft,
+    caret,
+    !!commandAgent,
+    commandAgent ? { id: commandAgent.id, folder: commandAgent.working_dir } : null,
+    api,
+  );
+  const runCommand = (text: string, confirmed = false) => {
+    const c = parseCommand(text);
+    if (!c || !commandAgent) return;
+    const agent = commandAgent;
+    if (c.name === "files") {
+      setDrafts((v) => ({ ...v, [agent.id]: "" }));
+      nav("files");
+      void browse(agent.working_dir, "page");
+      return;
+    }
+    if (c.name === "new" && !confirmed) {
+      setModal("new-session");
+      return;
+    }
+    void action(async () => {
+      const r = await api<{ note: Msg; session: Agent }>(
+        "/v1/sessions/" + encodeURIComponent(agent.id) + "/command",
+        c,
+      );
+      nearBottom.current = true;
+      setMessages((v) => (selectedRef.current === agent.id ? mergeMessages(v, [r.note]) : v));
+      setAgents((v) => v.map((a) => (a.id === agent.id ? { ...a, ...r.session, id: a.id } : a)));
+      setDrafts((v) => ({ ...v, [agent.id]: "" }));
+    });
+  };
+  const pickCommand = (o: CommandOption) => {
+    setDrafts((v) => ({ ...v, [selected]: o.text }));
+    if (o.run) return runCommand(o.text);
+    requestAnimationFrame(() => {
+      composer.current?.focus();
+      composer.current?.setSelectionRange(o.text.length, o.text.length);
+      setCaret(o.text.length);
     });
   };
   // Group members keep one name tone, so speakers are easy to tell apart.
@@ -1319,7 +1368,7 @@ export default function Workspace() {
                           )}
                           <article
                             className={
-                              (m.sender === "mace" ? "system-message " : "bubble ") +
+                              (m.kind === "note" ? "command-note " : m.sender === "mace" ? "system-message " : "bubble ") +
                               (mine ? "outgoing" : "incoming") +
                               (grouped ? " grouped" : "")
                             }
@@ -1329,8 +1378,10 @@ export default function Workspace() {
                                 {name(m.sender)}
                               </strong>
                             )}
-                            <div className={"message-text " + (mine ? "plain" : "markdown")}>
-                              {mine ? (
+                            <div className={"message-text " + (mine || m.kind === "note" ? "plain" : "markdown")}>
+                              {m.kind === "note" ? (
+                                m.text
+                              ) : mine ? (
                                 <PlainWithMentions text={m.text} handles={handles} />
                               ) : (
                                 <Suspense fallback={<span>{m.text}</span>}>
@@ -1427,7 +1478,31 @@ export default function Workspace() {
                       </button>
                     </div>
                   )}
-                  {mention.open && (
+                  {commands.open && (
+                    <ul className="mention-menu command-menu" id="mention-menu" role="listbox" aria-label="Commands">
+                      {commands.options.map((o, i) => (
+                        <li
+                          key={o.kind + o.id}
+                          id={"mention-" + i}
+                          role="option"
+                          aria-selected={i === commands.active}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            pickCommand(o);
+                          }}
+                        >
+                          <span className="all-icon">
+                            {o.kind === "folder" ? <FolderOpen size={17} /> : o.kind === "model" ? <Cpu size={17} /> : <Slash size={17} />}
+                          </span>
+                          <span>
+                            <strong>{o.label}</strong>
+                            {o.detail && <small>{o.detail}</small>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {mention.open && !commands.open && (
                     <ul className="mention-menu" id="mention-menu" role="listbox" aria-label="Mention a coworker">
                       {mention.options.map((p, i) => (
                         <li
@@ -1462,6 +1537,8 @@ export default function Workspace() {
                         (!(drafts[selected] || "").trim() && !attachment)
                       )
                         return;
+                      if (commandAgent && !attachment && parseCommand(drafts[selected] || ""))
+                        return runCommand(drafts[selected] || "");
                       void action(async () => {
                         const conversation = selected;
                         pendingSends.current[conversation] ||= randomID();
@@ -1509,15 +1586,17 @@ export default function Workspace() {
                       placeholder={
                         room
                           ? "Message the team"
-                          : "Message " + (chat?.name || "your agent")
+                          : "Message or /help"
                       }
                       rows={1}
                       value={drafts[selected] || ""}
                       role="combobox"
-                      aria-expanded={mention.open}
+                      aria-expanded={commands.open || mention.open}
                       aria-controls="mention-menu"
                       aria-autocomplete="list"
-                      aria-activedescendant={mention.open ? "mention-" + mention.active : undefined}
+                      aria-activedescendant={
+                        commands.open ? "mention-" + commands.active : mention.open ? "mention-" + mention.active : undefined
+                      }
                       onChange={(e) => {
                         const value = e.currentTarget.value;
                         const conversation = selected;
@@ -1528,6 +1607,23 @@ export default function Workspace() {
                       onKeyDown={(e) => {
                         if (e.nativeEvent.isComposing || e.keyCode === 229)
                           return;
+                        if (commands.open) {
+                          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                            e.preventDefault();
+                            commands.move(e.key === "ArrowDown" ? 1 : -1);
+                            return;
+                          }
+                          if (e.key === "Enter" || e.key === "Tab") {
+                            e.preventDefault();
+                            pickCommand(commands.options[commands.active]);
+                            return;
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            commands.dismiss();
+                            return;
+                          }
+                        }
                         if (mention.open) {
                           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                             e.preventDefault();
@@ -2189,6 +2285,7 @@ export default function Workspace() {
               logs: "Native process log",
               transfer: "Send file",
               role:'Role in this group',
+              "new-session": "Start a fresh session?",
               profile: "Name, mention and role",
             }[modal] || modal
           }
@@ -2563,6 +2660,22 @@ export default function Workspace() {
               </fieldset>
               <button className="primary" disabled={busy}>
                 Save
+              </button>
+            </form>
+          ) : modal === "new-session" ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setModal("");
+                runCommand("/new", true);
+              }}
+            >
+              <p>
+                {commandAgent?.name || "The agent"} starts its next turn in a new native session. Messages here stay, but it
+                will not remember its own earlier work, files read, or tool calls.
+              </p>
+              <button className="primary" autoFocus disabled={busy}>
+                Start fresh
               </button>
             </form>
           ) : modal === "role" ? (

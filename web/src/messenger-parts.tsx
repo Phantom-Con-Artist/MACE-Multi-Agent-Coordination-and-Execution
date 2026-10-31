@@ -157,6 +157,137 @@ export function useMentionMenu(
   };
 }
 
+/** Commands offered at the start of a message in a private chat. */
+export const chatCommands: { name: string; args?: string; detail: string }[] = [
+  { name: "model", args: "<name>", detail: "Set the model everywhere this agent works" },
+  { name: "models", detail: "List models and show the current one" },
+  { name: "cd", args: "<folder>", detail: "Change the working folder" },
+  { name: "new", detail: "Start a fresh native session" },
+  { name: "stop", detail: "Stop the current turn and clear waiting work" },
+  { name: "status", detail: "Model, folder, waiting work, and groups" },
+  { name: "rename", args: "<handle>", detail: "Change the mention handle" },
+  { name: "files", detail: "Open host files at the agent's folder" },
+  { name: "help", detail: "List commands" },
+];
+
+/** A known command at the start of a draft, or null for an ordinary message. */
+export function parseCommand(text: string) {
+  const m = /^\/([a-z]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  if (!m || !chatCommands.some((c) => c.name === m[1])) return null;
+  return { name: m[1], arg: (m[2] || "").trim() };
+}
+
+export type CommandOption = {
+  id: string;
+  label: string;
+  detail: string;
+  kind: "command" | "model" | "folder";
+  /** The whole draft after picking. */
+  text: string;
+  /** Picking runs the command at once instead of waiting for more input. */
+  run?: boolean;
+};
+
+const joinPath = (dir: string, name: string) => (dir.endsWith("/") ? dir : dir + "/") + name;
+
+/**
+ * The / menu. It lists commands while the first word is typed, then models
+ * after /model and folders after /cd. Same keys as the @ menu.
+ */
+export function useCommandMenu(
+  value: string,
+  caret: number,
+  enabled: boolean,
+  agent: { id: string; folder: string } | null,
+  load: <T>(path: string) => Promise<T>,
+) {
+  const [dismissed, setDismissed] = useState("");
+  const [active, setActive] = useState(0);
+  const [models, setModels] = useState<{ agent: string; list: { id: string; label?: string }[]; current: string } | null>(null);
+  const [folders, setFolders] = useState<{ dir: string; names: string[] }>({ dir: "", names: [] });
+  const atEnd = caret >= value.length;
+  const word = enabled && atEnd ? /^\/([a-z]*)$/.exec(value) : null;
+  const model = enabled && atEnd ? /^\/model\s+(\S*)$/.exec(value) : null;
+  const cd = enabled && atEnd ? /^\/cd\s+(.*)$/.exec(value) : null;
+
+  // The folder being browsed, absolute, and the partial name after it.
+  let dir = "",
+    partial = "",
+    typedDir = "";
+  if (cd && agent) {
+    const arg = cd[1];
+    const cut = arg.lastIndexOf("/");
+    typedDir = cut >= 0 ? arg.slice(0, cut + 1) : "";
+    partial = cut >= 0 ? arg.slice(cut + 1) : arg;
+    dir = typedDir.startsWith("/") ? typedDir || "/" : joinPath(agent.folder, typedDir);
+  }
+  useEffect(() => {
+    if (!model || !agent || models?.agent === agent.id) return;
+    load<{ models: { id: string; label?: string }[]; current: string }>("/v1/sessions/" + encodeURIComponent(agent.id) + "/models")
+      .then((r) => setModels({ agent: agent.id, list: r.models, current: r.current }))
+      .catch(() => setModels({ agent: agent.id, list: [], current: "" }));
+  }, [!!model, agent?.id]);
+  useEffect(() => {
+    if (!cd || folders.dir === dir) return;
+    let alive = true;
+    load<{ name: string; directory: boolean }[]>("/v1/files?path=" + encodeURIComponent(dir))
+      .then((r) => alive && setFolders({ dir, names: r.filter((e) => e.directory && !e.name.startsWith(".")).map((e) => e.name).sort() }))
+      .catch(() => alive && setFolders({ dir, names: [] }));
+    return () => {
+      alive = false;
+    };
+  }, [cd ? dir : ""]);
+
+  let options: CommandOption[] = [];
+  if (word) {
+    options = chatCommands
+      .filter((c) => c.name.startsWith(word[1]))
+      .map((c) => ({
+        id: c.name,
+        label: "/" + c.name + (c.args ? " " + c.args : ""),
+        detail: c.detail,
+        kind: "command",
+        text: "/" + c.name + (c.args ? " " : ""),
+        run: !c.args,
+      }));
+  } else if (model && models && models.agent === agent?.id) {
+    const q = model[1].toLowerCase();
+    const current = models.current || "default";
+    options = [{ id: "default", label: "CLI default" }, ...models.list]
+      .filter((m) => m.id.toLowerCase().includes(q) || (m.label || "").toLowerCase().includes(q))
+      .map((m) => ({
+        id: m.id,
+        label: m.id,
+        detail: [m.label !== m.id ? m.label : "", m.id === current ? "current" : ""].filter(Boolean).join(" · "),
+        kind: "model",
+        text: "/model " + m.id,
+        run: true,
+      }));
+  } else if (cd && folders.dir === dir) {
+    const q = partial.toLowerCase();
+    const matches = folders.names.filter((n) => n.toLowerCase().startsWith(q)).slice(0, 7);
+    options = matches.map((n) => ({
+      id: n,
+      label: n + "/",
+      detail: joinPath(dir, n),
+      kind: "folder",
+      text: "/cd " + typedDir + n + "/",
+    }));
+    if (!partial && cd[1] && matches.length)
+      options.unshift({ id: ".", label: "Use this folder", detail: dir, kind: "folder", text: value, run: true });
+  }
+  const key = word ? "w:" + word[1] : model ? "m:" + model[1] : cd ? "c:" + cd[1] : "";
+  if (key === dismissed) options = [];
+  useEffect(() => setActive(0), [key]);
+  return {
+    open: options.length > 0,
+    options,
+    active: Math.min(active, Math.max(0, options.length - 1)),
+    move: (d: number) => setActive((a) => (a + d + options.length) % options.length),
+    dismiss: () => setDismissed(key),
+  };
+}
+
 /** One readable line from Markdown, for chat list previews. */
 export function plainPreview(text: string) {
   return text

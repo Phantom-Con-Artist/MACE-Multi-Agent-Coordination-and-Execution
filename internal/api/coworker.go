@@ -93,12 +93,17 @@ func containsID(list []string, id string) bool {
 
 // latest summarizes the newest message of a conversation in one line.
 func (h *APIHandler) latest(ctx context.Context, room string) string {
-	rows, _, _ := h.store.Messages(ctx, room, 0, 0, 1)
-	if len(rows) == 0 {
+	rows, _, _ := h.store.Messages(ctx, room, 0, 0, 8)
+	var m Message
+	for i := len(rows) - 1; i >= 0; i-- {
+		if json.Unmarshal(rows[i].Data, &m) == nil && m.Kind != "note" {
+			break
+		}
+		m = Message{}
+	}
+	if m.ID == "" {
 		return ""
 	}
-	var m Message
-	json.Unmarshal(rows[0].Data, &m)
 	return fmt.Sprintf(" Latest: %s: %q", h.memberName(ctx, m.Sender), limited(strings.Join(strings.Fields(m.Text), " "), 140))
 }
 
@@ -170,7 +175,7 @@ func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage) str
 	var t strings.Builder
 	for _, b := range rows {
 		var m Message
-		if json.Unmarshal(b, &m) != nil {
+		if json.Unmarshal(b, &m) != nil || m.Kind == "note" {
 			continue
 		}
 		fmt.Fprintf(&t, "%s: %s\n", h.memberName(ctx, m.Sender), m.Text)
@@ -214,7 +219,7 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	fresh := false
 	for _, row := range newer {
 		var m Message
-		if json.Unmarshal(row.Data, &m) == nil && m.Sender != req.Member {
+		if json.Unmarshal(row.Data, &m) == nil && m.Sender != req.Member && m.Kind != "note" {
 			fresh = true
 		}
 	}
