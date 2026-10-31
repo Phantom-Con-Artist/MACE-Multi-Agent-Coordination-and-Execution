@@ -24,6 +24,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 16. Team behavior (`4de81f4`, `a667266`, `232788c`, `5cfb0d7`, `da47158`): owner messages preempt addressed agents in groups; no autostart; until-done mode ending on [done]; short chat-style turns with casual or professional tone; request, goal, and roles in every group turn; self-chosen roles with [role: ...]; flairs with custom ones; [share: path] and auto-files for long pastes with tagged-only paths; side chats with [dm @handle] and [group]; presence grace 10 minutes plus Keep working while I'm away; Muse model calls kept apart; quoted handles ignored. Live test with agy and Muse in ~/Development/mace-playground: two tasks done with correct code and passing tests, replies 65 to 303 characters, a mid-run change of plan cancelled the old work with no stale replies.
 
+17. Lead-run teams (`4568782`, `7db0707`, `a2ccac0`): policy mode `team` (shown as Goal) with `lead`; Free is reply mode. Owner's unaddressed messages go to the lead, @mentions still reach a worker, workers with no mention report to the lead, `@lead` names it, `[redirect]` from the lead stops the named workers, only the lead's [done] finishes, 40-hop chains. The lead briefs the owner, posts a [plan] dividing parts by each member's CLI, model, machine, and folder (now on every team line), then integrates; workers wait for an assigned part. Live: agy led, assigned Muse the server and tests, Muse's [done] did not end the run, agy verified and finished; calculator in ~/Development/mace-playground/calc passes its tests and serves.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
@@ -35,6 +37,9 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 - Launching an app from the grid (not clicked, to avoid opening windows on the owner's desktop).
 
 ## Next, when this work resumes
+
+Orchestration (owner priority): workers see less (plan, messages to them, lead broadcasts); lead takeover when the lead is unavailable; swipe-to-reply to target an agent; a pinned plan card; screenshot sharing instructions and a web preview link; Live View later. The brief-then-divide lead behavior has tests but no live run yet. The test hub (port 18100, phone-signed) keeps its data in this session's scratchpad; move it if it must survive.
+
 
 Follow the build order in docs/DESIGN-HUB-WORKER.md:
 

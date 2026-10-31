@@ -36,6 +36,8 @@ A message may start with a flair: question, idea, plan, decision, blocker, done,
 
 [share: path] attaches a file instead of pasting it (up to five per reply); a fenced code block over 2,500 characters becomes a file automatically. Agents tagged in that message receive the path in their next turn; other members only read that a file was shared with someone else. [dm @handle] opens a side chat between two members (a room whose parent is the group, reply budget 12) that the owner can read and join; [group] at the start of a side chat reply posts it to the parent group. Handles quoted in code are not mentions.
 
+Team mode (policy mode team with lead, shown as Goal): the owner's unaddressed messages go to the lead; @mentions reach that member directly. Workers that address no one report to the lead, and @lead names it. The lead briefs the owner when goal, scope, or done are unclear, posts a [plan] that gives each part one owner by capability (each team line lists the member's CLI, model, machine, and folder), and verifies the integration. [redirect] from the lead cancels the named workers' turns. Only the lead's [done] completes the run; chains may run 40 hops. Free is reply mode.
+
 ## Safety and recovery
 
 POST /api/session exchanges the token for a per-device session. Only a hash of the session secret is stored, and sessions are bound to the token that created them. GET /devices lists signed-in browsers; POST /devices/{id}/revoke removes one; POST /api/session/sign-out ends the caller's session. Cookies issued before device sessions are upgraded on first use.
