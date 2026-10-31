@@ -146,6 +146,28 @@ func (h *APIHandler) peerSessions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "host unavailable", 404)
 		return
 	}
+	if r.Method == "POST" {
+		// Start an agent on the other machine, in a folder there.
+		var req struct {
+			Provider   string `json:"provider"`
+			WorkingDir string `json:"working_dir"`
+		}
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil || req.Provider == "" {
+			http.Error(w, "choose an agent", 400)
+			return
+		}
+		var s Session
+		if e := h.peerRequest(r.Context(), p, "/sessions", req, &s); e != nil {
+			http.Error(w, e.Error(), 502)
+			return
+		}
+		s.ID = p.ID + "::" + s.ID
+		s.Name = p.Name + " / " + s.Name
+		h.store.PutDocument(r.Context(), "remote-session", s.ID, s)
+		h.audit("you", "REMOTE_AGENT_STARTED", s.ID, map[string]any{"machine": p.Name, "provider": req.Provider})
+		writeJSON(w, 201, s)
+		return
+	}
 	var out []Session
 	if e := h.peerRequest(r.Context(), p, "/sessions", nil, &out); e != nil {
 		http.Error(w, e.Error(), 502)
@@ -339,4 +361,20 @@ func (h *APIHandler) awaitMachine(ctx context.Context, room, peer string) error 
 		}
 	}
 	return nil
+}
+
+// peerCatalog serves GET /api/v1/peers/{id}/catalog: the agent CLIs another
+// machine has installed.
+func (h *APIHandler) peerCatalog(w http.ResponseWriter, r *http.Request) {
+	var p Peer
+	if h.peerDoc(r.Context(), routeParam(r, "id"), &p) != nil {
+		http.Error(w, "host unavailable", 404)
+		return
+	}
+	var out map[string]any
+	if e := h.peerRequest(r.Context(), p, "/catalog", nil, &out); e != nil {
+		http.Error(w, e.Error(), 502)
+		return
+	}
+	writeJSON(w, 200, out)
 }

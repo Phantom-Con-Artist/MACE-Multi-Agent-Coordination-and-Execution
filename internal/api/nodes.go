@@ -551,7 +551,7 @@ func (h *APIHandler) verifyNodeRequest(r *http.Request) (Node, []byte, error) {
 
 // nodeOwnerPaths are the owner's endpoints a joined machine may call on the
 // owner's behalf: agents, their turns and controls, files, and machine health.
-var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|sessions|metrics|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
+var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|catalog|sessions|metrics|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
 
 // nodeAuthorized checks a signed request from a joined machine to an owner
 // endpoint, leaving its body readable for the handler.

@@ -187,6 +187,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Get("/peers", handler.peers)
 		r.Post("/peers", handler.peers)
 		r.Get("/peers/{id}/sessions", handler.peerSessions)
+		r.Post("/peers/{id}/sessions", handler.peerSessions)
+		r.Get("/peers/{id}/catalog", handler.peerCatalog)
 		r.Get("/transfers", handler.transfers)
 		r.Post("/transfers", handler.transfers)
 		r.Post("/transfers/receive", handler.receive)

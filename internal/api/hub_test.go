@@ -124,3 +124,23 @@ func TestSignedRequestsReachOnlyTheOwnerPathsMeantForMachines(t *testing.T) {
 		t.Fatalf("a machine that never joined must be refused: %v", err)
 	}
 }
+
+func TestTheHubStartsAgentsOnAWorker(t *testing.T) {
+	hub, worker, _, dir := hubAndWorker(t)
+	node := worker.s.handler.selfNode().ID
+	var s Session
+	if c := hub.owner(t, "POST", "/api/v1/peers/"+node+"/sessions", map[string]string{"provider": "agy", "working_dir": dir}, &s); c != 201 || !strings.HasPrefix(s.ID, node+"::") {
+		t.Fatalf("start on the worker: %d %+v", c, s)
+	}
+	var mine []Session
+	worker.owner(t, "GET", "/api/v1/sessions", nil, &mine)
+	if len(mine) != 2 {
+		t.Fatalf("the worker should run the new agent itself: %+v", mine)
+	}
+	var cat struct {
+		Providers []Provider `json:"providers"`
+	}
+	if c := hub.owner(t, "GET", "/api/v1/peers/"+node+"/catalog", nil, &cat); c != 200 || len(cat.Providers) == 0 {
+		t.Fatalf("the hub should see the worker's CLIs: %d", c)
+	}
+}
