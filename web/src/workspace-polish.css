@@ -1694,3 +1694,48 @@
   font-size: 19px;
   letter-spacing: -0.02em;
 }
+
+/* Flairs and role claims sit above a message as small chips. */
+.app .msg-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.app .flair-chip,
+.app .role-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--soft);
+  color: var(--muted);
+}
+.app .flair-chip::before {
+  content: "#";
+  opacity: 0.6;
+  margin-right: 2px;
+}
+.app .flair-done,
+.app .flair-decision {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.app .flair-blocker {
+  background: var(--error-bg);
+  color: var(--error-text);
+}
+.app .role-chip {
+  font-weight: 500;
+  font-style: italic;
+}
+.app .side-label {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: var(--font-small);
+}

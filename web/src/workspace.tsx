@@ -95,7 +95,7 @@ type Agent = {
   working_dir: string;
   labels?: Record<string, string>;
 };
-type Room = { id: string; name: string; members: string[]; roles?:Record<string,string> };
+type Room = { id: string; name: string; members: string[]; roles?:Record<string,string>; claimed?: Record<string, string>; flairs?: string[]; parent?: string };
 type Msg = {
   id: string;
   room?: string;
@@ -108,11 +108,13 @@ type Msg = {
   delivery?: Record<string, string>;
   mentions?: string[];
   activity?: Step[];
+  flair?: string;
+  role?: string;
 };
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
-type Policy = { mode: string; goal: string; limit: number };
+type Policy = { mode: string; goal: string; limit: number; tone?: string };
 type Run = { id: string; status: string; replies: number; error?: string; active_member?:string; active_members?: string[] };
 // Messages arrive from the stream and from paged loads; keep one copy of each,
 // in conversation order.
@@ -229,6 +231,7 @@ export default function Workspace() {
     ),
     [pref, setPref] = useState<ThemePref>(themePref),
     [wallpaper, setWallpaperOn] = useState(wallpaperPref),
+    [keepWorking, setKeepWorking] = useState(false),
     [connected, setConnected] = useState(false),
     [online, setOnline] = useState(true),
     [checking, setChecking] = useState(true),
@@ -516,10 +519,14 @@ export default function Workspace() {
     };
   }, [connected]);
   useEffect(() => {
-    if (connected && page === "settings")
+    if (connected && page === "settings") {
       void api<Device[]>("/v1/devices")
         .then(setDevices)
         .catch(() => setDevices([]));
+      void api<{ keep_working: boolean }>("/v1/settings/presence")
+        .then((r) => setKeepWorking(r.keep_working))
+        .catch(() => {});
+    }
   }, [connected, page]);
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -1216,7 +1223,12 @@ export default function Workspace() {
                         <Avatar {...look(c.id)} group={group} working={busyHere.length > 0} />
                         <div className="chatcopy">
                           <div>
-                            <strong>{c.name}</strong>
+                            <strong>
+                              {c.name}
+                              {group && rooms.find((r) => r.id === c.id)?.parent && (
+                                <em className="side-label"> · side chat in {rooms.find((r) => r.id === rooms.find((x) => x.id === c.id)?.parent)?.name}</em>
+                              )}
+                            </strong>
                             <small>{preview ? listTime(preview.at) : ""}</small>
                           </div>
                           <div>
@@ -1378,6 +1390,12 @@ export default function Workspace() {
                               <strong className={"sender who-" + (senderTone(m.sender))}>
                                 {name(m.sender)}
                               </strong>
+                            )}
+                            {(m.flair || m.role) && (
+                              <div className="msg-tags">
+                                {m.flair && <span className={"flair-chip flair-" + m.flair.replaceAll(" ", "-")}>{m.flair}</span>}
+                                {m.role && <span className="role-chip">took on: {m.role}</span>}
+                              </div>
                             )}
                             <div className={"message-text " + (mine || m.kind === "note" ? "plain" : "markdown")}>
                               {m.kind === "note" ? (
@@ -2096,6 +2114,30 @@ export default function Workspace() {
                 </section>
                 <section className="setting">
                   <div>
+                    <h2>Keep working while I'm away</h2>
+                    <p>
+                      {keepWorking
+                        ? "Agents keep going when every device is closed or locked."
+                        : "Agents stop ten minutes after every device is closed or locked."}
+                    </p>
+                  </div>
+                  <button
+                    className="switch-track"
+                    role="switch"
+                    aria-checked={keepWorking}
+                    aria-label="Keep working while I'm away"
+                    onClick={() =>
+                      void action(async () => {
+                        const r = await api<{ keep_working: boolean }>("/v1/settings/presence", { keep_working: !keepWorking });
+                        setKeepWorking(r.keep_working);
+                      })
+                    }
+                  >
+                    <span />
+                  </button>
+                </section>
+                <section className="setting">
+                  <div>
                     <h2>Chat wallpaper</h2>
                     <p>A quiet pattern of the MACE shapes behind conversations.</p>
                   </div>
@@ -2409,7 +2451,6 @@ export default function Workspace() {
                     "/v1/chats/" + encodeURIComponent(selected) + "/policy",
                     policy,
                   );
-                  if(room&&policy.mode==='continuous'&&!running)await api('/v1/chats/'+encodeURIComponent(selected)+'/start',{});
                   await refresh();
                   setModal("");
                 });
@@ -2425,9 +2466,18 @@ export default function Workspace() {
                 >
                   <option value="reply">Reply limit</option>
                   <option value="goal">Goal oriented</option>
-                  <option value="continuous">Continuous, until paused</option>
+                  <option value="continuous">Until done</option>
                 </select>
               </label>
+              {room && (
+                <label>
+                  Texting style
+                  <select value={policy.tone || "casual"} onChange={(e) => setPolicy({ ...policy, tone: e.target.value })}>
+                    <option value="casual">Casual: short, chat-style, shorthand welcome</option>
+                    <option value="professional">Professional: short and plain</option>
+                  </select>
+                </label>
+              )}
               {policy.mode === "goal" && (
                 <label>
                   Goal
@@ -2456,13 +2506,13 @@ export default function Workspace() {
               )}
               <p>
                 {policy.mode === "continuous"
-                  ? "Agents keep taking turns until paused. Each reply uses its host provider."
+                  ? "After your message, agents keep working together until one reports it done, they run out of things to add, or you step in. They never start on their own."
                   : policy.mode === "goal"
                     ? "Stops on an agent completion report or the reply budget. Review its evidence."
                     : "Agents take turns within this total reply budget."}
               </p>
               <button className="primary" disabled={busy || running}>
-                {room&&policy.mode==='continuous'?'Save and start':'Save mode'}
+                Save mode
               </button>
             </form>
           ) : modal === "details" ? (
