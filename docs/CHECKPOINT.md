@@ -22,12 +22,16 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 15. Hub and worker step 4, first slice, record sync (`internal/api/sync.go`): heads and chain endpoints, verified incremental fetch, cached copies relayed through other nodes, merged view at `GET /api/v1/records/{conversation}` with offline nodes, sync after each availability check. Checked live between two isolated servers on the tailnet.
 
+16. Team behavior (`4de81f4`, `a667266`, `232788c`, `5cfb0d7`, `da47158`): owner messages preempt addressed agents in groups; no autostart; until-done mode ending on [done]; short chat-style turns with casual or professional tone; request, goal, and roles in every group turn; self-chosen roles with [role: ...]; flairs with custom ones; [share: path] and auto-files for long pastes with tagged-only paths; side chats with [dm @handle] and [group]; presence grace 10 minutes plus Keep working while I'm away; Muse model calls kept apart; quoted handles ignored. Live test with agy and Muse in ~/Development/mace-playground: two tasks done with correct code and passing tests, replies 65 to 303 characters, a mid-run change of plan cancelled the old work with no stale replies.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
 - Linger (start at boot before login); not run because it changes a system setting.
 - Joining and availability across two real machines (the tailnet has only `fedora` so far).
 - Anything across real machines: peer monitors, remote commands, Tailnet, phone hardware, two-machine Wi-Fi.
+- Side chats and [share] with real agents (covered by tests; the live tasks were too small to need them).
+- Muse's shell fails when its folder is `/` or the home folder: the system bwrap lacks --ro-bind-symlink. It works in project folders. Not a MACE fix.
 - Launching an app from the grid (not clicked, to avoid opening windows on the owner's desktop).
 
 ## Next, when this work resumes
