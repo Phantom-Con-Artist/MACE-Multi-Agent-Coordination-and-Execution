@@ -22,6 +22,10 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 - Launching an app from the new grid (not clicked, to avoid opening windows on the owner's desktop).
 - `/model` with a live Claude Code or Codex turn, and commands on a remote agent through a real second host.
 
+## Architecture decision (2026-10-31)
+
+Hub and worker nodes, every node stores its own data, records named by content hash with per-node chains. See docs/DESIGN-HUB-WORKER.md. Its build order comes before the remaining phase 3 to 6 items, which it partly absorbs.
+
 ## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
 
 1. Files: streaming viewer for any size, pdf.js, hex view, transfers without the 32 MiB cap.

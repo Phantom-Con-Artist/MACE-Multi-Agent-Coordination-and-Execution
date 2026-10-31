@@ -1,0 +1,122 @@
+# MACE design: hub and worker nodes
+
+Status: direction approved by the owner on 2026-10-31. Not yet built. Date: 2026-10-31.
+
+This document replaces the peer model (one host connecting to another with a URL and token) and the host-facing parts of phase 4 in [DESIGN-REMOTE-COWORKERS.md](DESIGN-REMOTE-COWORKERS.md). Everything else in that document still applies. AGENTS.md constraints still apply.
+
+## The rule
+
+Every node stores its own data. A node is the only writer of what it owns. Other nodes may keep read-only cached copies, marked as cached, so history stays readable while the owner node is away.
+
+## Roles
+
+One daemon, two roles.
+
+| Role | What it does | How it runs |
+|---|---|---|
+| Worker | Runs agents, owns their private chats and native sessions, owns the groups it hosts, serves files, launches apps, samples machine metrics | `mace` as a user service, started at boot, restarted on failure |
+| Hub | Discovers workers, merges their data into one view, routes the owner's actions to the owning worker, serves the web interface | `mace-server start` on the device the owner is using; any worker can also serve it |
+
+A hub device is also a worker. The hub stores no data of its own beyond caches, so switching hubs changes nothing the owner sees.
+
+The phone is never a node. It opens a hub's web interface over HTTPS and can install it as a home-screen app. No dedicated mobile application. A phone can use any always-on worker as its hub, so the laptop does not need to be awake.
+
+## Ownership
+
+| Data | Owner |
+|---|---|
+| An agent, its profile, model, folder, native session | The worker it runs on |
+| A private chat with an agent | That agent's worker |
+| A group's settings: name, members, roles, mode, goal | The group's home worker, chosen at creation (default: the first always-on worker) |
+| A message | The node that wrote it: the agent's worker for agent messages, the conversation's owner for the owner's messages |
+| Receipts and read cursors | The node of the reader |
+| Files | The node where the file was created or attached |
+
+The group's home worker runs the group's turns, so groups keep working when the hub closes. Agents on other workers take turns through their own worker.
+
+## Records
+
+Everything stored is a record: a message, a group settings change, a membership change, a receipt, an edit, a deletion marker, a file manifest.
+
+### Identity by hash
+
+A record's ID is the SHA-256 of its canonical envelope:
+
+| Field | Purpose |
+|---|---|
+| `node` | ID of the writing node |
+| `author` | Agent, owner, or MACE |
+| `conversation` | Private chat or group ID |
+| `clock` | Hybrid logical clock: wall time plus a counter, never moving backwards |
+| `prev` | Hash of this node's previous record in this conversation |
+| `seen` | Hashes of the newest records from other nodes the author had seen |
+| `kind` | message, note, settings, member, receipt, edit, delete, file |
+| `body` | The content |
+| `sig` | The writing node's signature over the fields above |
+
+Identical text produces different IDs because the envelope differs. A record cannot change without its ID changing, so a fetched copy proves itself. The canonical encoding is fixed and versioned so hashes stay stable across releases.
+
+Node IDs are the hash of the node's public key, created when the node is set up.
+
+### Chains
+
+Each node's records in a conversation form a hash chain through `prev`. A node's head hash per conversation summarizes everything it has written there. Breaks in the chain show missing or altered records.
+
+### Ordering
+
+Records are shown in causal order: a record always follows everything in its `seen` and `prev`. Ties are broken by `clock`, then by node ID. Clock skew between machines cannot place a reply before the message it answers.
+
+### Edits and deletion
+
+An edit is a new record naming the record it replaces. A deletion is a marker naming the deleted hash. Caches drop the content when they sync the marker. The owner node decides.
+
+## Sync
+
+1. The hub asks each available worker for its head hash per conversation.
+2. Heads that match the cache need nothing.
+3. For a differing head, the hub walks the chain back from the new head until it reaches a known hash, and fetches only those records.
+4. Every fetched record is verified: hash matches content, signature matches the node's enrolled key, `prev` links to a known record.
+5. Records from an unavailable node are served from cache, marked as cached. Records never cached show as a plain gap: "PC is offline. Its messages appear when it returns."
+
+There are no merge conflicts, because each node is the only writer of its own chain.
+
+Reconstruction restores the record, not what agents knew at the time. Agents that kept working while a node was away did not see its messages, and MACE does not re-run their turns.
+
+## Files
+
+Files are split into chunks. Each chunk is addressed by its SHA-256. A file's ID is the hash of its manifest: the ordered chunk hashes, size, name, and type. Transfers fetch missing chunks only, so they resume after interruption, verify every chunk, and have no size cap. A file shared twice is stored once. This covers the transfer part of phase 3.
+
+## Joining and availability
+
+- Tailscale proves the device belongs to the owner. MACE does not run its own network.
+- `mace join` on a new machine, or scanning a QR code from a hub, records the new node's public key with the existing nodes. Joining happens once per machine.
+- Hubs find workers through the tailnet and the joined-node list. No addresses are typed.
+- A worker that is reachable and healthy is available. Asleep, off, or unreachable is unavailable. Nothing more.
+- A locked screen makes only desktop app launching unavailable. Agents and files keep working.
+
+## What changes from today
+
+| Today | After |
+|---|---|
+| Peers added by URL and access token | Nodes joined once by key over Tailscale |
+| Groups and messages live in the host's SQLite as mutable documents | Groups and messages are hashed, signed, append-only records per node |
+| Remote agents proxied through `::` IDs | The hub routes to the owning worker by node ID |
+| Transfers base64 JSON, 32 MiB cap | Chunked, content addressed, resumable |
+| `mace start` printing local and Wi-Fi links | Worker as a service; `mace-server start` printing the Tailscale HTTPS link and a QR code |
+
+Existing data is migrated once: each current message becomes a record owned by the local node, chained in its current order.
+
+## Build order
+
+1. Records: canonical envelope, hashing, signing, hybrid logical clock, per-node chains, migration of existing data. Tests for hash stability, ordering under clock skew, and chain verification.
+2. Worker service: systemd user unit, linger, `mace setup`.
+3. Joining: node keys, `mace join`, QR code, discovery over Tailscale.
+4. Hub: head comparison, chain walking, caches, merged views, routing actions to owners, offline gaps in the interface.
+5. Chunked files and transfers.
+6. `mace-server start` with the Tailscale HTTPS link, home-screen install, and notifications.
+
+## Verification that needs the real environment
+
+- Two or more real machines on the owner's tailnet, including one going to sleep and returning.
+- `tailscale serve` HTTPS on the owner's phone, home-screen install, and notifications.
+- Localhost pairs of daemons prove the protocol only and are reported as such.

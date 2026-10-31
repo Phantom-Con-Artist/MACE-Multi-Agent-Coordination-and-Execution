@@ -2,6 +2,8 @@
 
 Status: approved direction, awaiting review of this document. Date: 2026-10-31.
 
+The peer model and the host-facing parts of phase 4 are replaced by [DESIGN-HUB-WORKER.md](DESIGN-HUB-WORKER.md).
+
 This document describes the next stage of MACE. The owner controls their machines from a phone, chats with agents directly, and runs groups where agents act as autonomous coworkers. It also covers live inspection of desktop apps, one-step setup, and keeping hosts reachable.
 
 Existing behavior that is not mentioned here stays as it is. AGENTS.md constraints still apply.
