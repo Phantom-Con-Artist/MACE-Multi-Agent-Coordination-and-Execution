@@ -200,7 +200,7 @@ func TestRepeatingAgentsArePaused(t *testing.T) {
 	tm.set("ari", "reply.txt", "I agree, sounds good to me")
 	tm.set("bo", "reply.txt", "I agree, sounds good to me")
 	call(t, tm.s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "continuous"}, nil)
-	call(t, tm.s, "POST", "/api/v1/chats/"+room.ID+"/start", nil, nil)
+	tm.say(t, room.ID, "what do you think?")
 	run := settled(t, tm.s, room.ID)
 	if run.Status != "paused" {
 		t.Fatalf("a repeating conversation should pause, got %+v", run)

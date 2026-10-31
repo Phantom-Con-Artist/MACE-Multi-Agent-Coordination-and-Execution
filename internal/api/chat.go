@@ -19,14 +19,18 @@ type Room struct {
 	Members []string          `json:"members"`
 	Roles   map[string]string `json:"roles,omitempty"`
 	Removed bool              `json:"removed,omitempty"`
+	// Flairs are custom message tags this group added beyond the standard ones.
+	Flairs []string `json:"flairs,omitempty"`
 }
 type Message struct {
-	ID       string    `json:"id"`
-	Room     string    `json:"room"`
-	Sender   string    `json:"sender"`
-	Text     string    `json:"text"`
-	File     string    `json:"file,omitempty"`
-	Kind     string    `json:"kind,omitempty"`
+	ID     string `json:"id"`
+	Room   string `json:"room"`
+	Sender string `json:"sender"`
+	Text   string `json:"text"`
+	File   string `json:"file,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	// Flair is the message's tag, such as "question" or "done".
+	Flair    string    `json:"flair,omitempty"`
 	ClientID string    `json:"client_id,omitempty"`
 	At       time.Time `json:"at"`
 	// Seq is the message's position, assigned by storage.

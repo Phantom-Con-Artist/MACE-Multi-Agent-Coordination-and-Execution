@@ -69,28 +69,11 @@ func (h *APIHandler) memberRole(w http.ResponseWriter, r *http.Request) {
 	h.audit("you", "MEMBER_ROLE_CHANGED", id, map[string]any{"member": member, "role": role})
 	writeJSON(w, 200, group)
 }
+
+// startDiscussion serves POST /api/v1/chats/{room}/start. Agents never begin
+// a conversation on their own; the owner's first message starts it.
 func (h *APIHandler) startDiscussion(w http.ResponseWriter, r *http.Request) {
-	id := routeParam(r, "room")
-	var group Room
-	if h.store.Document(r.Context(), "room", id, &group) != nil || group.Removed {
-		http.Error(w, "Group not found.", 404)
-		return
-	}
-	if len(group.Members) == 0 {
-		http.Error(w, "Add an agent before starting the conversation.", 400)
-		return
-	}
-	p := Policy{}
-	if h.store.Document(r.Context(), "policy", id, &p) != nil || p.Mode != "continuous" {
-		http.Error(w, "Choose Continuous mode to start an open conversation.", 400)
-		return
-	}
-	m, e := h.wakeAll(r.Context(), id, "Continuous conversation started. The team can talk and collaborate without waiting for another message.")
-	if e != nil {
-		http.Error(w, e.Error(), 409)
-		return
-	}
-	writeJSON(w, 201, m)
+	http.Error(w, "Write a message to start. Agents begin when you do.", 409)
 }
 
 // Stopping one employee does not stop the rest of a group. Membership edits are

@@ -27,8 +27,8 @@ func TestContinuousMembershipRolesAndGroupRemoval(t *testing.T) {
 		t.Fatal("roles should be unassigned by default")
 	}
 	call(t, s, "POST", "/api/v1/chats/"+group.ID+"/policy", Policy{Mode: "continuous"}, nil)
-	if call(t, s, "POST", "/api/v1/chats/"+group.ID+"/start", map[string]any{}, nil) != 201 {
-		t.Fatal("continuous discussion should start without a typed prompt")
+	if call(t, s, "POST", "/api/v1/chats/"+group.ID+"/messages", map[string]string{"text": "keep going on the plan"}, nil) != 201 {
+		t.Fatal("the owner's message should start the conversation")
 	}
 	t.Cleanup(func() {
 		if t.Failed() {

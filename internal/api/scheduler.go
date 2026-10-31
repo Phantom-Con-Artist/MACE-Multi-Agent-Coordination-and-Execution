@@ -39,6 +39,7 @@ const (
 var (
 	errGoalComplete = errors.New("goal reported complete")
 	errLoop         = errors.New("conversation loop detected")
+	errSuperseded   = errors.New("superseded by a newer owner message")
 )
 
 func continuousGap() time.Duration {
@@ -71,11 +72,14 @@ type memberQueue struct {
 }
 
 type roomRun struct {
-	run      Run
-	gen      int
-	inflight int
-	limitHit bool
-	closed   bool
+	run Run
+	gen int
+	// superseded holds, per member, the generation of the newest owner
+	// message addressed to it. Replies from older turns are discarded.
+	superseded map[string]int
+	inflight   int
+	limitHit   bool
+	closed     bool
 	// progress records a posted reply since the last continuous round.
 	progress bool
 	lastErr  string
@@ -454,6 +458,22 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 		rr.run = Run{ID: room, Status: "running", Policy: p}
 		rr.gen++
 		rr.inflight, rr.limitHit, rr.closed, rr.lastErr, rr.recent, rr.strikes = 0, false, false, "", nil, 0
+		// In a group the owner's word wins: the agents it addresses drop what
+		// they were doing here, and nothing they started earlier is posted.
+		if group != nil && m.Sender == "you" {
+			if rr.superseded == nil {
+				rr.superseded = map[string]int{}
+			}
+			for _, c := range picks {
+				rr.superseded[c.member] = rr.gen
+				if q := h.queues[c.member]; q != nil {
+					q.queue = slices.DeleteFunc(q.queue, func(r *turnRequest) bool { return r.Room == room })
+					if q.running != nil && q.running.Room == room {
+						q.cancel(errSuperseded)
+					}
+				}
+			}
+		}
 	} else if rr.closed {
 		h.sched.Unlock()
 		return nil
@@ -582,7 +602,17 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		text = strings.TrimSpace(strings.ReplaceAll(text, "[GOAL_COMPLETE]", ""))
 	}
 	text = strings.TrimSpace(strings.ReplaceAll(text, "[PASS]", ""))
-	reply := Message{ID: newID(), Room: req.Room, Sender: req.Member, Text: text, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: req.Hop + 1, Activity: res.Activity}
+	flair, text := h.takeFlair(ctx, req.Room, group, text)
+	if flair == "done" && (p.Mode == "continuous" || p.Mode == "goal") {
+		goal = p.Mode == "goal"
+	}
+	h.sched.Lock()
+	stale := req.Gen < rr.superseded[req.Member]
+	h.sched.Unlock()
+	if stale {
+		return // The owner wrote to this agent after the turn began.
+	}
+	reply := Message{ID: newID(), Room: req.Room, Sender: req.Member, Text: text, Flair: flair, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: req.Hop + 1, Activity: res.Activity}
 	reply.Mentions, reply.MentionsAll = parseMentions(text, h.roomHandles(ctx, members))
 	if _, err := h.postMessage(ctx, &reply); err != nil {
 		return
@@ -598,6 +628,11 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	h.sched.Unlock()
 	if goal {
 		h.halt(req.Room, errGoalComplete, "goal_reported_complete")
+		return
+	}
+	if flair == "done" && p.Mode == "continuous" {
+		// "Until done" ends when an agent reports the request is done.
+		h.halt(req.Room, errGoalComplete, "completed")
 		return
 	}
 	if h.looping(req.Room, text) {
