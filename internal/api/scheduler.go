@@ -657,6 +657,7 @@ func jaccard(a, b string) float64 {
 func (h *APIHandler) setCursor(ctx context.Context, member, room string, seq int64) {
 	if seq > 0 {
 		h.store.PutDocument(ctx, "cursor", member+"|"+room, map[string]int64{"seq": seq})
+		h.events.publish("cursor", map[string]any{"room": room, "member": member, "seq": seq})
 	}
 }
 

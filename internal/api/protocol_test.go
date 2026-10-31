@@ -353,3 +353,24 @@ func TestEventStreamDeliversAndResumes(t *testing.T) {
 	defer cancel()
 	_ = ctx
 }
+
+func TestInboxAndReceipts(t *testing.T) {
+	tm := newTeam(t, "ari")
+	id := tm.agents["ari"].ID
+	m := tm.say(t, id, "hello")
+	settled(t, tm.s, id)
+	var inbox []struct {
+		Room   string  `json:"room"`
+		Latest Message `json:"latest"`
+		Unread int     `json:"unread"`
+	}
+	call(t, tm.s, "POST", "/api/v1/inbox", map[string]any{"seen": map[string]int64{id: m.Seq}}, &inbox)
+	if len(inbox) != 1 || inbox[0].Room != id || inbox[0].Latest.Sender != id || inbox[0].Unread != 1 {
+		t.Fatalf("inbox should show the agent's reply as one unread message: %+v", inbox)
+	}
+	var receipts map[string]int64
+	call(t, tm.s, "GET", "/api/v1/chats/"+id+"/receipts", nil, &receipts)
+	if receipts[id] < m.Seq {
+		t.Fatalf("the agent read the owner's message, so its receipt must cover it: %v", receipts)
+	}
+}

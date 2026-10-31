@@ -48,8 +48,8 @@ func TestAdaptersParseRecordedStreams(t *testing.T) {
 func TestStepTitlesShowFileNames(t *testing.T) {
 	for in, want := range map[string]string{
 		"Read text file `/tmp/x/project/PLAN.md`": "Read `PLAN.md`",
-		"Ran `go test ./...`":                      "Ran `go test ./...`",
-		"Edited `main.go`":                         "Edited `main.go`",
+		"Ran `go test ./...`":                     "Ran `go test ./...`",
+		"Edited `main.go`":                        "Edited `main.go`",
 	} {
 		if got := shortTitle(in); got != want {
 			t.Fatalf("shortTitle(%q) = %q, want %q", in, got, want)

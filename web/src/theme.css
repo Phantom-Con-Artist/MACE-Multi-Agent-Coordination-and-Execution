@@ -1,0 +1,929 @@
+/* MACE brand theme. Loaded last, so these tokens win over earlier files.
+   Every palette comes from the logo: signal red #A20000, ink, and paper.
+   Brand red fills carry light text (8:1). On dark palettes, red used as
+   text or icon color is lifted (--green, kept by name for older rules). */
+
+@font-face {
+  font-family: Archivo;
+  src: url("/fonts/archivo-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: Archivo;
+  src: url("/fonts/archivo-latin-ext.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+:root {
+  --brand-red: #a20000;
+  --brand-black: #000000;
+  --font-display: Archivo, Manrope, "Segoe UI", sans-serif;
+  --font-ui: Manrope, "Segoe UI", sans-serif;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.76, 0, 0.24, 1);
+  --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Signal: paper, ink, red signal. The default light palette. */
+html[data-palette="signal"],
+html[data-palette="signal"] .app,
+html[data-palette="signal"] .public-site {
+  --chrome: #161112;
+  --chrome-ink: #f6f1ec;
+  --chrome-muted: #a39a96;
+  --surface: #fffdfa;
+  --soft: #f3eee8;
+  --line: #e7e0d7;
+  --text: #171213;
+  --muted: #6b6160;
+  --accent: #a20000;
+  --accent-ink: #fff8f4;
+  --accent-soft: #f6e2dd;
+  --green: #a20000;
+  --bubble: #f6e2dd;
+  --bubble-ink: #2b0d0b;
+  --incoming: #fffdfa;
+  --chat: #f1ebe3;
+  --selected: #f1e4df;
+  --focus: #a20000;
+  --error-bg: #fbe7e2;
+  --error-text: #87160d;
+  --site-bg: #f6f1ea;
+  --logo-tile: #000000;
+  --logo-shape: #a20000;
+  background: #f6f1ea;
+}
+
+/* Ink: dark and quiet. */
+html[data-palette="ink"],
+html[data-palette="ink"] .app,
+html[data-palette="ink"] .public-site {
+  --chrome: #050404;
+  --chrome-ink: #f3ece8;
+  --chrome-muted: #8f8481;
+  --surface: #141011;
+  --soft: #1f1a1a;
+  --line: #2f2828;
+  --text: #f4eeea;
+  --muted: #a99d99;
+  --accent: #b80d07;
+  --accent-ink: #fff6f2;
+  --accent-soft: #3a1714;
+  --green: #ff6b5d;
+  --bubble: #4a1511;
+  --bubble-ink: #fdeeea;
+  --incoming: #1d1818;
+  --chat: #0d0a0a;
+  --selected: #2a1f1e;
+  --focus: #ff6b5d;
+  --error-bg: #3c1a17;
+  --error-text: #ffb4a8;
+  --site-bg: #0d0a0a;
+  --logo-tile: #000000;
+  --logo-shape: #c20a03;
+  background: #0d0a0a;
+}
+
+/* Ember: red forward on warm paper. */
+html[data-palette="ember"],
+html[data-palette="ember"] .app,
+html[data-palette="ember"] .public-site {
+  --chrome: #a20000;
+  --chrome-ink: #fff4ef;
+  --chrome-muted: #f2b8ad;
+  --surface: #fff9f3;
+  --soft: #f7e9df;
+  --line: #ecd6c8;
+  --text: #1c0c0b;
+  --muted: #74524c;
+  --accent: #a20000;
+  --accent-ink: #fff8f4;
+  --accent-soft: #f8d9cf;
+  --green: #a20000;
+  --bubble: #a20000;
+  --bubble-ink: #fff6f2;
+  --incoming: #fff9f3;
+  --chat: #f6e6da;
+  --selected: #f6d9cd;
+  --focus: #a20000;
+  --error-bg: #fbe1d9;
+  --error-text: #7e1209;
+  --site-bg: #f6e8dc;
+  --logo-tile: #a20000;
+  --logo-shape: #000000;
+  background: #f6e8dc;
+}
+
+/* Carbon: maximum contrast, red only for live signals. */
+html[data-palette="carbon"],
+html[data-palette="carbon"] .app,
+html[data-palette="carbon"] .public-site {
+  --chrome: #000000;
+  --chrome-ink: #ffffff;
+  --chrome-muted: #a6a6a6;
+  --surface: #0a0a0a;
+  --soft: #171717;
+  --line: #3a3a3a;
+  --text: #fafafa;
+  --muted: #c4c4c4;
+  --accent: #d10f08;
+  --accent-ink: #ffffff;
+  --accent-soft: #2b0f0d;
+  --green: #ff5546;
+  --bubble: #f2f2f2;
+  --bubble-ink: #0a0a0a;
+  --incoming: #1a1a1a;
+  --chat: #000000;
+  --selected: #262626;
+  --focus: #ffffff;
+  --error-bg: #3a0e0b;
+  --error-text: #ffb3a8;
+  --site-bg: #050505;
+  --logo-tile: #000000;
+  --logo-shape: #e0120a;
+  background: #050505;
+}
+
+html {
+  font-family: var(--font-ui);
+}
+.app,
+.public-site {
+  font-family: var(--font-ui);
+}
+
+/* Logo */
+.mace-logo {
+  display: block;
+  overflow: visible;
+}
+.mace-logo .logo-bg,
+.mace-logo .logo-pill {
+  fill: var(--logo-tile);
+}
+.mace-logo .logo-shape polygon {
+  fill: var(--logo-shape);
+  stroke: var(--logo-shape);
+}
+.mace-logo.inverse .logo-bg,
+.mace-logo.inverse .logo-pill {
+  fill: var(--logo-shape);
+}
+.mace-logo.inverse .logo-shape polygon {
+  fill: var(--logo-tile);
+  stroke: var(--logo-tile);
+}
+/* Assembly: each triangle arrives from where it points, tile by tile; the
+   E tile's message pills draw in last. */
+.mace-logo.assemble .logo-shape {
+  animation: logo-in 700ms var(--ease-out) both;
+}
+.mace-logo.assemble .logo-M .logo-shape {
+  --from: translateY(-640px);
+}
+.mace-logo.assemble .logo-A .logo-shape {
+  --from: translateY(640px);
+  animation-delay: 90ms;
+}
+.mace-logo.assemble .logo-C .logo-shape {
+  --from: translateX(420px);
+  animation-delay: 180ms;
+}
+.mace-logo.assemble .logo-E .logo-shape {
+  --from: translateX(420px);
+  animation-delay: 270ms;
+}
+.mace-logo.assemble .logo-pill {
+  transform-box: fill-box;
+  transform-origin: right center;
+  animation: pill-in 420ms var(--ease-out) both;
+  animation-delay: 620ms;
+}
+.mace-logo.assemble .logo-pill:nth-of-type(3) {
+  animation-delay: 690ms;
+}
+.mace-logo.assemble .logo-pill:nth-of-type(4) {
+  animation-delay: 760ms;
+}
+@keyframes logo-in {
+  from {
+    transform: var(--from);
+  }
+}
+@keyframes pill-in {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* Working signal: the E tile's pills, lit in turn like lines being written. */
+.working-pills {
+  display: inline-grid;
+  justify-items: end;
+  gap: 2px;
+  width: 18px;
+  flex: none;
+}
+.working-pills i {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--green);
+  opacity: 0.28;
+  transform-origin: right center;
+  animation: pills 1.35s var(--ease-in-out) infinite;
+}
+.working-pills i:nth-child(1) {
+  width: 11px;
+}
+.working-pills i:nth-child(2) {
+  width: 18px;
+  animation-delay: 150ms;
+}
+.working-pills i:nth-child(3) {
+  width: 11px;
+  animation-delay: 300ms;
+}
+@keyframes pills {
+  0%,
+  70%,
+  100% {
+    opacity: 0.28;
+    transform: scaleX(0.55);
+  }
+  30% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mace-logo.assemble .logo-shape,
+  .mace-logo.assemble .logo-pill,
+  .working-pills i {
+    animation: none;
+  }
+  .working-pills i {
+    opacity: 0.8;
+  }
+}
+
+/* Navigation chrome: the rail is a logo tile. Ink (or red, in Ember) with a
+   signal-red active mark. On phones it becomes the bottom tab bar. */
+.app .rail {
+  background: var(--chrome);
+  border-right: 0;
+  color: var(--chrome-ink);
+}
+.app .rail .brand .mace-mark {
+  width: 28px;
+  height: auto;
+}
+.app .rail .navlinks button,
+.app .rail .theme {
+  color: var(--chrome-muted);
+  transition: color 200ms var(--ease-out), background-color 200ms var(--ease-out);
+}
+.app .rail .navlinks button:hover,
+.app .rail .theme:hover {
+  background: rgb(255 255 255 / 0.08);
+  color: var(--chrome-ink);
+}
+.app .rail .navlinks .active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 14px;
+}
+html[data-palette="ember"] .app .rail .navlinks .active {
+  background: var(--chrome-ink);
+  color: var(--accent);
+}
+.app .rail :focus-visible {
+  outline-color: var(--chrome-ink);
+}
+@media (max-width: 800px) {
+  .app .rail .navlinks .active {
+    background: transparent;
+    color: var(--chrome-ink);
+  }
+  .app .rail .navlinks .active svg {
+    color: var(--chrome-ink);
+  }
+  .app .rail .navlinks .active::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    width: 34px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+  html[data-palette="ember"] .app .rail .navlinks .active::before {
+    background: var(--chrome-ink);
+  }
+}
+
+/* Actions */
+.app .primary,
+.public-site .primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.app .primary:hover,
+.public-site .primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.app a {
+  color: var(--green);
+}
+.app ::selection,
+.public-site ::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Display type: Archivo expanded echoes the logo's wide tiles. */
+.app h1,
+.app .chatlist h1,
+.app .welcome h2,
+.app .connect-screen h1 {
+  font-family: var(--font-display);
+  font-stretch: 118%;
+  font-weight: 760;
+  letter-spacing: -0.035em;
+}
+
+/* Conversations */
+.app .messages {
+  background-color: var(--chat);
+  position: relative;
+  isolation: isolate;
+}
+/* The wallpaper scrolls with the conversation and stays inside it. */
+html[data-wallpaper="pattern"] .app .messages {
+  background-image: var(--wallpaper);
+  background-size: 180px 180px;
+  background-attachment: local;
+}
+html[data-palette="signal"] { --wallpaper: url("/brand/pattern-signal.svg"); }
+html[data-palette="ink"] { --wallpaper: url("/brand/pattern-ink.svg"); }
+html[data-palette="ember"] { --wallpaper: url("/brand/pattern-ember.svg"); }
+html[data-palette="carbon"] { --wallpaper: url("/brand/pattern-carbon.svg"); }
+.app .bubble {
+  background: var(--incoming);
+  color: var(--text);
+}
+.app .bubble.outgoing {
+  background: var(--bubble);
+  color: var(--bubble-ink);
+}
+.app .bubble.outgoing > small {
+  color: color-mix(in srgb, var(--bubble-ink) 66%, transparent);
+}
+.app .sender {
+  color: var(--green);
+}
+
+/* Theme picker */
+.app .setting.appearance {
+  flex-direction: column;
+  align-items: stretch;
+}
+.app .theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+.app .theme-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  justify-items: start;
+  width: 100%;
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 10px 12px;
+  border-radius: 16px;
+  background: var(--soft);
+  border: 2px solid transparent;
+  text-align: left;
+  transition: border-color 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+.app .theme-card:hover {
+  background: var(--soft);
+  transform: translateY(-2px);
+}
+.app .theme-card[aria-checked="true"] {
+  border-color: var(--accent);
+}
+.app .theme-card strong {
+  font-size: var(--font-label);
+  margin-top: 6px;
+}
+.app .theme-card small {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.4;
+}
+/* Each preview draws a miniature of that palette's messenger. */
+.app .theme-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  overflow: hidden;
+  display: block;
+}
+.app .theme-preview i {
+  position: absolute;
+  display: block;
+  border-radius: 6px;
+}
+.app .theme-preview .tp-rail {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 18%;
+  border-radius: 0;
+}
+.app .theme-preview .tp-in {
+  left: 26%;
+  top: 14%;
+  width: 46%;
+  height: 18%;
+}
+.app .theme-preview .tp-in.short {
+  top: 68%;
+  width: 30%;
+}
+.app .theme-preview .tp-out {
+  right: 8%;
+  top: 41%;
+  width: 44%;
+  height: 18%;
+}
+.theme-card[data-preview="signal"] .theme-preview { background: #f1ebe3; }
+.theme-card[data-preview="signal"] .tp-rail { background: #161112; }
+.theme-card[data-preview="signal"] .tp-in { background: #fffdfa; }
+.theme-card[data-preview="signal"] .tp-out { background: #a20000; }
+.theme-card[data-preview="ink"] .theme-preview { background: #0d0a0a; }
+.theme-card[data-preview="ink"] .tp-rail { background: #000; }
+.theme-card[data-preview="ink"] .tp-in { background: #1d1818; }
+.theme-card[data-preview="ink"] .tp-out { background: #6b1a14; }
+.theme-card[data-preview="ember"] .theme-preview { background: #f6e6da; }
+.theme-card[data-preview="ember"] .tp-rail { background: #a20000; }
+.theme-card[data-preview="ember"] .tp-in { background: #fff9f3; }
+.theme-card[data-preview="ember"] .tp-out { background: #a20000; }
+.theme-card[data-preview="carbon"] .theme-preview { background: #000; outline: 1px solid #3a3a3a; outline-offset: -1px; }
+.theme-card[data-preview="carbon"] .tp-rail { background: #111; }
+.theme-card[data-preview="carbon"] .tp-in { background: #2a2a2a; }
+.theme-card[data-preview="carbon"] .tp-out { background: #f2f2f2; }
+
+.app .connect-logo {
+  width: min(240px, 60vw);
+  height: auto;
+  margin-bottom: 18px;
+}
+.app .welcome-mark {
+  width: 64px;
+  height: auto;
+}
+.app .intro-mark {
+  width: 40px;
+  height: auto;
+}
+
+/* ---------- Messenger ---------- */
+.app .chatlist {
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+.app .chatlist > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 16px 10px 20px;
+}
+.app .chatlist h1 {
+  font-size: clamp(1.5rem, 1.2rem + 1vw, 1.85rem);
+  margin: 0;
+}
+.app .icon-button {
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  border-radius: 14px;
+  padding: 0;
+}
+.app .icon-button.accent {
+  background: var(--accent);
+  color: var(--accent-ink);
+  transition: transform 200ms var(--ease-back), filter 200ms var(--ease-out);
+}
+.app .icon-button.accent:hover {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+.app .icon-button.accent[aria-expanded="true"] svg {
+  transform: rotate(45deg);
+}
+.app .icon-button.accent svg {
+  transition: transform 250ms var(--ease-out);
+}
+.app .menu-anchor {
+  position: relative;
+}
+.app .popover-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  width: 260px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.16);
+  display: grid;
+  gap: 2px;
+  transform-origin: top right;
+  animation: pop 220ms var(--ease-out) both;
+}
+.app .popover-menu button {
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 11px;
+  text-align: left;
+  font-weight: 600;
+}
+.app .popover-menu button > svg {
+  color: var(--green);
+  flex: none;
+}
+.app .popover-menu small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-4px);
+  }
+}
+.app .search {
+  margin: 4px 16px 10px;
+  border-radius: 14px;
+  background: var(--soft);
+  min-height: 42px;
+}
+.app .conversation {
+  min-height: 76px;
+  padding: 10px 16px;
+  align-items: center;
+  transition: background-color 160ms var(--ease-out);
+}
+.app .conversation:hover {
+  background: var(--soft);
+}
+.app .conversation.selected {
+  background: var(--selected);
+}
+.app .conversation .chatcopy {
+  border-bottom: 0;
+  padding: 0;
+}
+.app .chatcopy > div + div {
+  margin-top: 3px;
+}
+.app .chatcopy p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.app .conversation.unread .chatcopy strong {
+  font-weight: 750;
+}
+.app .conversation.unread .chatcopy > div:first-child small {
+  color: var(--green);
+  font-weight: 700;
+}
+.app .badge {
+  flex: none;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.72rem;
+  font-weight: 750;
+  display: inline-grid;
+  place-items: center;
+  animation: pop 220ms var(--ease-back) both;
+}
+.app .list-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--green) !important;
+  font-weight: 600;
+}
+.app .list-working span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tile avatars: a single MACE tile, its letter chosen by provider. */
+.tile-avatar {
+  display: inline-block;
+  flex: none;
+  position: relative;
+  border-radius: 28%;
+  overflow: hidden;
+}
+.tile-avatar .mace-tile {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+/* A tile is portrait; the avatar crops it to a square around the shape. */
+.tile-avatar.working::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-ink);
+  box-shadow: inset 0 0 0 3px var(--accent);
+  animation: live 1.4s var(--ease-in-out) infinite;
+}
+@keyframes live {
+  50% {
+    transform: scale(0.75);
+  }
+}
+.app .emptylist .empty-mark {
+  width: 56px;
+  height: auto;
+  margin-bottom: 8px;
+}
+
+/* Conversation header: identity and live status, nothing else by default. */
+.app .threadhead {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.app .threadtitle small {
+  color: var(--muted);
+}
+.app .pause-now {
+  color: var(--green);
+  background: var(--accent-soft);
+}
+.app .pause-now:hover {
+  background: var(--accent-soft);
+  filter: brightness(0.97);
+}
+
+/* Messages */
+.app .day-divider {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0 8px;
+  position: sticky;
+  top: 8px;
+  z-index: 1;
+}
+.app .day-divider span {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 650;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.app .bubble {
+  position: relative;
+  border-radius: 18px;
+  box-shadow: 0 1px 1.5px rgb(0 0 0 / 0.07);
+  margin-block: 10px 0;
+}
+.app .bubble.grouped {
+  margin-top: 3px;
+}
+/* The tail is the logo's triangle, not a speech curve. */
+.app .bubble:not(.grouped)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 14px;
+  background: inherit;
+}
+.app .bubble.incoming:not(.grouped) {
+  border-top-left-radius: 4px;
+}
+.app .bubble.incoming:not(.grouped)::before {
+  left: -7px;
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+.app .bubble.outgoing:not(.grouped) {
+  border-top-right-radius: 4px;
+}
+.app .bubble.outgoing:not(.grouped)::before {
+  right: -7px;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+.app .sender {
+  font-size: var(--font-small);
+  font-weight: 750;
+  margin-bottom: 3px;
+}
+.app .sender.who-1 { color: var(--green); }
+.app .sender.who-2 { color: color-mix(in srgb, var(--text) 78%, var(--green)); }
+.app .sender.who-3 { color: color-mix(in srgb, var(--green) 62%, #8a4a00); }
+.app .sender.who-4 { color: color-mix(in srgb, var(--muted) 70%, var(--green)); }
+.app .bubble .meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.app .bubble.outgoing .meta {
+  color: color-mix(in srgb, var(--bubble-ink) 62%, transparent);
+}
+.app .meta-failed {
+  color: var(--error-text);
+  font-weight: 700;
+}
+.app .receipt {
+  display: inline-grid;
+  place-items: center;
+  transition: color 300ms var(--ease-out);
+}
+.app .receipt.read {
+  color: var(--green);
+}
+html[data-palette="ember"] .app .bubble.outgoing .receipt.read {
+  color: #ffd9cf;
+}
+html[data-palette="carbon"] .app .bubble.outgoing .receipt.read {
+  color: #b30d06;
+}
+.app .mention {
+  color: var(--green);
+  font-weight: 700;
+}
+html[data-palette="ember"] .app .bubble.outgoing .mention {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+html[data-palette="carbon"] .app .bubble.outgoing .mention {
+  color: #b30d06;
+}
+.app .file-link {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: 4px;
+}
+.app .file-link:hover {
+  background: transparent;
+}
+.app .system-message {
+  background: transparent;
+}
+.app .system-message .message-text {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+
+/* Composer: a quiet pill with one red action. */
+.app .composer {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  gap: 8px;
+}
+.app .composer textarea {
+  background: var(--soft);
+  border: 1px solid transparent;
+  border-radius: 22px;
+  padding: 11px 16px;
+  transition: border-color 160ms var(--ease-out);
+}
+.app .composer textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.app .send {
+  background: var(--accent);
+  color: var(--accent-ink);
+  transition: transform 220ms var(--ease-back), opacity 200ms var(--ease-out);
+}
+.app .send:hover {
+  background: var(--accent);
+}
+.app .send:not(:disabled):active {
+  transform: scale(0.92);
+}
+.app .send:disabled {
+  opacity: 0.35;
+}
+.app .mention-menu {
+  list-style: none;
+  margin: 0 14px 6px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 -10px 30px rgb(0 0 0 / 0.1);
+  animation: pop 200ms var(--ease-out) both;
+  transform-origin: bottom left;
+}
+.app .mention-menu li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 11px;
+  cursor: pointer;
+}
+.app .mention-menu li[aria-selected="true"] {
+  background: var(--selected);
+}
+.app .mention-menu strong {
+  display: block;
+  font-size: var(--font-label);
+}
+.app .mention-menu small {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.app .mention-menu .all-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app .popover-menu,
+  .app .badge,
+  .app .mention-menu,
+  .tile-avatar.working::after {
+    animation: none;
+  }
+}
+
+/* The header adapts to whichever actions are present (Pause only appears
+   while agents work), so it is a flex row at every size. */
+html .app .threadhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+html .app .threadhead .threadtitle {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  html .app .threadhead {
+    padding: 8px 8px 8px 4px;
+    gap: 8px;
+    min-height: 60px;
+  }
+  /* Inside a conversation the tab bar steps aside, like any messenger. */
+  .app:has(.messenger.has-chat) .rail {
+    display: none;
+  }
+  .app:has(.messenger.has-chat) main {
+    height: var(--viewport-height, 100dvh);
+  }
+}

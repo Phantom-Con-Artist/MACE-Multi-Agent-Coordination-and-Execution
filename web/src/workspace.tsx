@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   Suspense,
   useEffect,
@@ -11,6 +12,25 @@ import PublicSite from "./public-site";
 import { Button } from "@/components/ui/button";
 const AgentMessage = lazy(() => import("./agent-message"));
 import { StepList, WorkCard, type Step } from "./agent-work";
+import { MaceLogo, MaceMark, WorkingPills } from "./brand";
+import {
+  Avatar,
+  PlainWithMentions,
+  dayLabel,
+  listTime,
+  plainPreview,
+  useMentionMenu,
+  type Suggestion,
+} from "./messenger-parts";
+import {
+  applyTheme,
+  palettes,
+  resolve,
+  setWallpaper,
+  themePref,
+  wallpaperPref,
+  type ThemePref,
+} from "./theme";
 import {
   MessageCircle,
   Home,
@@ -43,6 +63,9 @@ import {
   ArrowDown,
   Pencil,
   ShieldCheck,
+  Check,
+  CheckCheck,
+  AtSign,
 } from "lucide-react";
 type Agent = {
   id: string;
@@ -186,7 +209,8 @@ export default function Workspace() {
   const [page, setPage] = useState(
       initial.startsWith("connect=") ? "messenger" : initial || "home",
     ),
-    [dark, setDark] = useState(localStorage.getItem("mace-theme") === "dark"),
+    [pref, setPref] = useState<ThemePref>(themePref),
+    [wallpaper, setWallpaperOn] = useState(wallpaperPref),
     [connected, setConnected] = useState(false),
     [online, setOnline] = useState(true),
     [checking, setChecking] = useState(true),
@@ -221,6 +245,10 @@ export default function Workspace() {
     }),
     [searches, setSearches] = useState<Record<string, string>>({}),
     [filter, setFilter] = useState("all"),
+    [newMenu, setNewMenu] = useState(false),
+    [inbox, setInbox] = useState<Record<string, { latest: Msg; unread: number }>>({}),
+    [receipts, setReceipts] = useState<Record<string, number>>({}),
+    [caret, setCaret] = useState(0),
     [modal, setModal] = useState(""),
     [attachments, setAttachments] = useState<Record<string, string>>({}),
     [groupMembers, setGroupMembers] = useState<string[]>([]),
@@ -280,6 +308,35 @@ export default function Workspace() {
     working = [
       ...new Set([...(run?.active_members || []), ...Object.keys(liveHere)]),
     ];
+  const dark = palettes.find((p) => p.id === resolve(pref))?.scheme === "dark";
+  // The quick toggle moves between the two everyday palettes.
+  const toggleScheme = () => setPref(dark ? "signal" : "ink");
+  const handles = (room ? room.members : selected ? [selected] : [])
+    .map((id) => all.find((a) => a.id === id)?.handle)
+    .filter((h): h is string => !!h);
+  const people: Suggestion[] = (room ? room.members : [])
+    .map((id) => all.find((a) => a.id === id))
+    .filter((a): a is Agent => !!a?.handle)
+    .map((a) => ({ id: a.id, handle: a.handle!, name: a.name, detail: statusLabel(a.status), provider: a.provider }));
+  if (room)
+    people.push({ id: "all", handle: "all", name: "Everyone", detail: "Every agent in this group" });
+  const draft = drafts[selected] || "";
+  const mention = useMentionMenu(draft, caret, people);
+  const pickMention = (p: Suggestion) => {
+    const { next, caret: at } = mention.insert(p);
+    setDrafts((v) => ({ ...v, [selected]: next }));
+    requestAnimationFrame(() => {
+      composer.current?.focus();
+      composer.current?.setSelectionRange(at, at);
+      setCaret(at);
+    });
+  };
+  // Group members keep one name tone, so speakers are easy to tell apart.
+  const senderTone = (id: string) => ((room?.members.indexOf(id) ?? 0) % 4) + 1;
+  const openFile = (path: string) => {
+    setPreview(path);
+    setModal("preview");
+  };
   const name = (id: string) =>
     id === "you" ? "You" : id==='mace'?'Mace':all.find((a) => a.id === id)?.name || id;
   const nav = (p: string) => {
@@ -425,9 +482,15 @@ export default function Workspace() {
     if (connected) void import("./agent-message");
   }, [connected]);
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
-    localStorage.setItem("mace-theme", dark ? "dark" : "light");
-  }, [dark]);
+    applyTheme(pref);
+    if (pref !== "auto") return;
+    // Auto follows the system as it changes, such as at sunset.
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const follow = () => applyTheme("auto");
+    media.addEventListener("change", follow);
+    return () => media.removeEventListener("change", follow);
+  }, [pref]);
+  useEffect(() => setWallpaper(wallpaper), [wallpaper]);
   useEffect(() => {
     const fn = () => setPage(location.hash.slice(1) || "home");
     window.addEventListener("hashchange", fn);
@@ -492,6 +555,41 @@ export default function Workspace() {
     setMessages([]);
     setOlderAvailable(false);
   }, [selected]);
+  // The chat list: newest message and unread count per conversation. What has
+  // been seen is remembered per browser.
+  useEffect(() => {
+    if (!connected) return;
+    let seen: Record<string, number> = {};
+    try {
+      seen = JSON.parse(stored("mace-seen") || "{}");
+    } catch {
+      /* A damaged record only resets unread counts. */
+    }
+    void api<{ room: string; latest: Msg; unread: number }[]>("/v1/inbox", { seen })
+      .then((rows) =>
+        setInbox(Object.fromEntries(rows.map((r) => [r.room, { latest: r.latest, unread: r.unread }]))),
+      )
+      .catch(() => {});
+  }, [connected, reloadKey]);
+  useEffect(() => {
+    if (!selected) return;
+    const last = messages.reduce((n, m) => Math.max(n, m.seq || 0), 0);
+    if (!last) return;
+    try {
+      const seen = JSON.parse(stored("mace-seen") || "{}");
+      if ((seen[selected] || 0) < last) store("mace-seen", JSON.stringify({ ...seen, [selected]: last }));
+    } catch {
+      store("mace-seen", JSON.stringify({ [selected]: last }));
+    }
+    setInbox((v) => (v[selected]?.unread ? { ...v, [selected]: { ...v[selected], unread: 0 } } : v));
+  }, [selected, messages]);
+  useEffect(() => {
+    setReceipts({});
+    if (!selected || !connected) return;
+    void api<Record<string, number>>("/v1/chats/" + encodeURIComponent(selected) + "/receipts")
+      .then(setReceipts)
+      .catch(() => {});
+  }, [selected, connected]);
   async function loadOlder() {
     const first = messages.find((m) => m.seq);
     const pane = messagePane.current;
@@ -529,6 +627,23 @@ export default function Workspace() {
       const m = data<Msg>(e);
       if (m.room === selectedRef.current)
         setMessages((v) => mergeMessages(v, [m]));
+      if (m.room && m.seq)
+        setInbox((v) => {
+          const prev = v[m.room!];
+          if (prev && (prev.latest.seq ?? 0) > m.seq!) return v;
+          const fresh = !prev || prev.latest.id !== m.id;
+          const counts =
+            fresh && m.room !== selectedRef.current && m.sender !== "you";
+          return {
+            ...v,
+            [m.room!]: { latest: m, unread: (prev?.unread || 0) + (counts ? 1 : 0) },
+          };
+        });
+    });
+    stream.addEventListener("cursor", (e) => {
+      const c = data<{ room: string; member: string; seq: number }>(e);
+      if (c.room === selectedRef.current)
+        setReceipts((v) => ({ ...v, [c.member]: Math.max(v[c.member] || 0, c.seq) }));
     });
     stream.addEventListener("run", (e) => {
       const r = data<Run>(e);
@@ -804,7 +919,7 @@ export default function Workspace() {
         page={page}
         navigate={nav}
         dark={dark}
-        toggleTheme={() => setDark(!dark)}
+        toggleTheme={toggleScheme}
         connected={connected}
       />
     );
@@ -812,7 +927,7 @@ export default function Workspace() {
     <div className="app">
       <nav className="rail" aria-label="Main navigation">
         <a className="brand" href="#home" aria-label="Mace home">
-          <img src="/mace-mark.svg" alt="Mace" />
+          <MaceMark title="MACE home" inverse />
         </a>
         <div className="navlinks">
           {navItems.map(([id, Icon, label]) => (
@@ -831,8 +946,8 @@ export default function Workspace() {
         </div>
         <button
           className="theme"
-          aria-label="Toggle theme"
-          onClick={() => setDark(!dark)}
+          aria-label={dark ? "Use a light theme" : "Use a dark theme"}
+          onClick={toggleScheme}
         >
           {dark ? <Sun /> : <Moon />}
         </button>
@@ -886,7 +1001,7 @@ export default function Workspace() {
         )}
         {!connected ? (
           <div className="connect-screen">
-            <img src="/mace-mark.svg" width="64" height="64" alt="Mace" />
+            <MaceLogo assemble className="connect-logo" />
             <h1>
               {checking
                 ? "Connecting…"
@@ -932,44 +1047,59 @@ export default function Workspace() {
           <div className={"messenger " + (selected ? "has-chat" : "")}>
             <aside className="chatlist">
               <header>
-                <h1>
-                  Chats<span className="count">{chats.length}</span>
-                </h1>
-                <div>
+                <h1>Chats</h1>
+                <div className="menu-anchor">
                   <button
-                    aria-label="New group"
-                    onClick={() => setModal("group")}
+                    className="icon-button accent"
+                    aria-label="New chat"
+                    aria-haspopup="menu"
+                    aria-expanded={newMenu}
+                    onClick={() => setNewMenu(!newMenu)}
                   >
-                    <Users size={21} />
+                    <Plus size={22} />
                   </button>
-                  <button
-                    aria-label="New agent"
-                    onClick={() => setModal("launch")}
-                  >
-                    <Plus size={24} />
-                  </button>
+                  {newMenu && (
+                    <div className="popover-menu" role="menu" onKeyDown={(e) => e.key === "Escape" && setNewMenu(false)}>
+                      <button role="menuitem" autoFocus onClick={() => { setNewMenu(false); setModal("launch"); }}>
+                        <Terminal size={18} />
+                        <span>
+                          New agent
+                          <small>Start an installed CLI agent</small>
+                        </span>
+                      </button>
+                      <button role="menuitem" onClick={() => { setNewMenu(false); setModal("group"); }}>
+                        <Users size={18} />
+                        <span>
+                          New group
+                          <small>Agents that work together</small>
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </header>
               <label className="search">
-                <Search size={18} />
+                <Search size={17} />
                 <input
-                  aria-label="Search conversations"
-                  placeholder="Search conversations"
+                  aria-label="Search chats"
+                  placeholder="Search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </label>
-              <div className="filters">
-                {["all", "agents", "groups"].map((f) => (
-                  <button
-                    className={filter === f ? "chosen" : ""}
-                    key={f}
-                    onClick={() => setFilter(f)}
-                  >
-                    {f[0].toUpperCase() + f.slice(1)}
-                  </button>
-                ))}
-              </div>
+              {chats.length > 6 && rooms.length > 0 && (
+                <div className="filters">
+                  {["all", "agents", "groups"].map((f) => (
+                    <button
+                      className={filter === f ? "chosen" : ""}
+                      key={f}
+                      onClick={() => setFilter(f)}
+                    >
+                      {f[0].toUpperCase() + f.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="conversations">
                 {chats
                   .filter(
@@ -980,37 +1110,81 @@ export default function Workspace() {
                           ? c.status === "group"
                           : c.status !== "group")),
                   )
-                  .map((c) => (
-                    <button
-                      className={
-                        "conversation " + (selected === c.id ? "selected" : "")
-                      }
-                      key={c.id}
-                      onClick={() => {
-                        select(c.id);
-                      }}
-                    >
-                      <div className="avatar">
-                        {c.status === "group" ? <Users /> : <Terminal />}
-                      </div>
-                      <div className="chatcopy">
-                        <div>
-                          <strong>{c.name}</strong>
-                          <small>{statusLabel(c.status)}</small>
+                  .sort(
+                    (a, b) =>
+                      (inbox[b.id]?.latest.seq ?? 0) - (inbox[a.id]?.latest.seq ?? 0),
+                  )
+                  .map((c) => {
+                    const group = c.status === "group";
+                    const entry = inbox[c.id];
+                    const busyHere = Object.entries(live[c.id] || {});
+                    const step = busyHere
+                      .flatMap(([who, steps]) => steps.map((s) => ({ who, s })))
+                      .filter((x) => x.s.state === "running")
+                      .at(-1);
+                    const unread = selected === c.id ? 0 : entry?.unread || 0;
+                    const preview = entry?.latest;
+                    return (
+                      <button
+                        className={
+                          "conversation" +
+                          (selected === c.id ? " selected" : "") +
+                          (unread ? " unread" : "")
+                        }
+                        key={c.id}
+                        onClick={() => select(c.id)}
+                      >
+                        <Avatar
+                          id={c.id}
+                          provider={(c as Agent).provider}
+                          group={group}
+                          working={busyHere.length > 0}
+                        />
+                        <div className="chatcopy">
+                          <div>
+                            <strong>{c.name}</strong>
+                            <small>{preview ? listTime(preview.at) : ""}</small>
+                          </div>
+                          <div>
+                            {busyHere.length ? (
+                              <p className="list-working">
+                                <WorkingPills />
+                                <span>
+                                  {step
+                                    ? (group ? name(step.who) + " · " : "") +
+                                      step.s.title.replaceAll("`", "")
+                                    : joinNames(busyHere.map(([who]) => name(who))) +
+                                      (busyHere.length === 1 ? " is working" : " are working")}
+                                </span>
+                              </p>
+                            ) : (
+                              <p>
+                                {preview
+                                  ? (preview.sender === "you"
+                                      ? "You: "
+                                      : group && preview.sender !== "mace"
+                                        ? name(preview.sender) + ": "
+                                        : "") + plainPreview(preview.text)
+                                  : group
+                                    ? `${rooms.find((r) => r.id === c.id)?.members.length} agents`
+                                    : "Say hello to start"}
+                              </p>
+                            )}
+                            {unread > 0 && (
+                              <span className="badge" aria-label={unread + " unread"}>
+                                {unread > 99 ? "99+" : unread}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <p>
-                          {c.status === "group"
-                            ? `${rooms.find((r) => r.id === c.id)?.members.length} agents`
-                            : folderName(c.working_dir)}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 {!chats.length && (
                   <div className="emptylist">
-                    <MessageCircle size={34} />
+                    <MaceMark className="empty-mark" title="" />
                     <h2>Who shall we work with?</h2>
-                    <p>Choose from your installed agents.</p>
+                    <p>Pick an agent installed on this computer.</p>
                     <button
                       className="primary"
                       onClick={() => setModal("launch")}
@@ -1020,22 +1194,6 @@ export default function Workspace() {
                   </div>
                 )}
               </div>
-              <footer className="host">
-                <span className={online ? "online" : "offline"} />
-                <div>
-                  <strong>
-                    {String(node.host_name || node.name || "Your host")}
-                  </strong>
-                  <small>
-                    {online
-                      ? "Connected · private workspace"
-                      : "Reconnecting to host"}
-                  </small>
-                </div>
-                <button aria-label="Open host" onClick={() => nav("host")}>
-                  <ChevronRight size={18} />
-                </button>
-              </footer>
             </aside>
             <section className="thread" aria-label="Conversation">
               {chat ? (
@@ -1048,9 +1206,13 @@ export default function Workspace() {
                     >
                       <ArrowLeft />
                     </button>
-                    <div className="avatar">
-                      {room ? <Users /> : <Terminal />}
-                    </div>
+                    <Avatar
+                      id={chat.id}
+                      provider={(chat as Agent).provider}
+                      group={!!room}
+                      size={40}
+                      working={working.length > 0}
+                    />
                     <div className="threadtitle">
                       <strong>{chat.name}</strong>
                       <small title={chat.working_dir}>
@@ -1059,29 +1221,30 @@ export default function Workspace() {
                             (working.length === 1 ? " is working" : " are working")
                           : running
                             ? "Waiting for the next turn"
-                            : statusLabel(chat.status) +
+                            : room
+                              ? room.members.map((id) => "@" + (all.find((a) => a.id === id)?.handle || name(id))).join(", ")
+                              : statusLabel(chat.status) +
                             (chat.working_dir
                               ? " · " + folderName(chat.working_dir)
                               : "")}
                       </small>
                     </div>
-                    <button
-                      aria-label={running?'Pause conversation':room&&policy.mode==='continuous'?'Start conversation':'Pause conversation'}
-                      disabled={busy||(!running&&(!room||policy.mode!=='continuous'||!room.members.length))}
-                      onClick={() =>
-                        void action(async () => {
-                          await api(
-                            "/v1/chats/" +
-                              encodeURIComponent(selected) +
-                              (running?"/pause":"/start"),
-                            {},
-                          );
-                          await refresh();
-                        })
-                      }
-                    >
-                      {!running&&room&&policy.mode==='continuous'?<Play size={20}/>:<Pause size={20}/>}
-                    </button>
+                    {running && (
+                      <button
+                        className="icon-button pause-now"
+                        aria-label="Pause this conversation"
+                        title="Pause"
+                        disabled={busy}
+                        onClick={() =>
+                          void action(async () => {
+                            await api("/v1/chats/" + encodeURIComponent(selected) + "/pause", {});
+                            await refresh();
+                          })
+                        }
+                      >
+                        <Pause size={20} />
+                      </button>
+                    )}
                     <button
                       aria-label="Conversation controls"
                       onClick={() => setModal("details")}
@@ -1089,23 +1252,6 @@ export default function Workspace() {
                       <MoreVertical />
                     </button>
                   </header>
-                  <button
-                    className="policy-strip"
-                    onClick={() => setModal("policy")}
-                  >
-                    <span>
-                      {policy.mode === "goal"
-                        ? "Goal: " + policy.goal
-                        : policy.mode === "continuous"
-                          ? "Continuous · until paused"
-                          : "Reply limit · " +
-                            policy.limit +
-                            (policy.limit === 1 ? " reply" : " replies")}
-                    </span>
-                    <span>
-                      Change <ChevronRight size={14} />
-                    </span>
-                  </button>
                   <div
                     className="messages"
                     ref={messagePane}
@@ -1131,51 +1277,70 @@ export default function Workspace() {
                         What would you like {chat.name} to do?
                       </div>
                     )}
-                    {messages.map((m) => (
-                      <article
-                        key={m.id}
-                        className={
-                          (m.sender==='mace'?'system-message ':'bubble ') +
-                          (m.sender === "you" ? "outgoing" : "incoming")
-                        }
-                      >
-                        <strong
-                          className={
-                            "sender" +
-                            (m.sender === "you" || m.sender==='mace' ||
-                            (!room && m.sender === selected)
-                              ? " sr-only"
-                              : "")
-                          }
-                        >
-                          {name(m.sender)}
-                        </strong>
-                        <div
-                          className={
-                            "message-text " +
-                            (m.sender === "you" ? "plain" : "markdown")
-                          }
-                        >
-                          {m.sender === "you" ? (
-                            m.text
-                          ) : (
-                            <Suspense fallback={<span>{m.text}</span>}>
-                              <AgentMessage text={m.text} />
-                            </Suspense>
+                    {messages.map((m, i) => {
+                      const prev = messages[i - 1];
+                      const newDay = !prev || dayLabel(prev.at) !== dayLabel(m.at);
+                      const grouped =
+                        !!prev &&
+                        !newDay &&
+                        prev.sender === m.sender &&
+                        m.sender !== "mace" &&
+                        new Date(m.at).getTime() - new Date(prev.at).getTime() < 5 * 60000;
+                      const mine = m.sender === "you";
+                      const addressed = m.mentions?.length ? m.mentions : room ? room.members : [selected];
+                      const read =
+                        mine && !!m.seq && addressed.length > 0 &&
+                        addressed.every((id) => (receipts[id] || 0) >= m.seq!);
+                      const failed = Object.values(m.delivery || {}).some((v) => v !== "delivered");
+                      return (
+                        <Fragment key={m.id}>
+                          {newDay && (
+                            <div className="day-divider" role="separator">
+                              <span>{dayLabel(m.at)}</span>
+                            </div>
                           )}
-                        </div>
-                        {m.activity && <StepList steps={m.activity} />}
-                        {m.file && <Media path={m.file} />}
-                        <small>
-                          {Object.values(m.delivery || {}).some(
-                            (v) => v !== "delivered",
-                          )
-                            ? "Delivery issue · "
-                            : ""}
-                          {clock(m.at)}
-                        </small>
-                      </article>
-                    ))}
+                          <article
+                            className={
+                              (m.sender === "mace" ? "system-message " : "bubble ") +
+                              (mine ? "outgoing" : "incoming") +
+                              (grouped ? " grouped" : "")
+                            }
+                          >
+                            {!mine && m.sender !== "mace" && room && !grouped && (
+                              <strong className={"sender who-" + (senderTone(m.sender))}>
+                                {name(m.sender)}
+                              </strong>
+                            )}
+                            <div className={"message-text " + (mine ? "plain" : "markdown")}>
+                              {mine ? (
+                                <PlainWithMentions text={m.text} handles={handles} />
+                              ) : (
+                                <Suspense fallback={<span>{m.text}</span>}>
+                                  <AgentMessage text={m.text} handles={handles} onFile={openFile} />
+                                </Suspense>
+                              )}
+                            </div>
+                            {m.activity && <StepList steps={m.activity} />}
+                            {m.file && <Media path={m.file} />}
+                            {m.sender !== "mace" && (
+                              <small className="meta">
+                                {failed && <span className="meta-failed">Not delivered · </span>}
+                                {clock(m.at)}
+                                {mine && !failed && (
+                                  <span
+                                    className={"receipt" + (read ? " read" : "")}
+                                    aria-label={read ? "Read by the agents" : "Sent"}
+                                    title={read ? "Read by the agents" : "Sent"}
+                                  >
+                                    {read ? <CheckCheck size={15} /> : <Check size={15} />}
+                                  </span>
+                                )}
+                              </small>
+                            )}
+                          </article>
+                        </Fragment>
+                      );
+                    })}
                     {working.map((id) => (
                       <WorkCard
                         key={id}
@@ -1217,12 +1382,7 @@ export default function Workspace() {
                         </button>
                       </div>
                     )}
-                    {run && !running && run.status !== "interrupted" && (
-                      <div className="work-state">
-                        {statusLabel(run.status)} · {run.replies}{" "}
-                        {run.replies === 1 ? "reply" : "replies"}
-                      </div>
-                    )}
+
                     <div ref={bottom} />
                   </div>
                   {unread && (
@@ -1248,6 +1408,32 @@ export default function Workspace() {
                         <X size={16} />
                       </button>
                     </div>
+                  )}
+                  {mention.open && (
+                    <ul className="mention-menu" id="mention-menu" role="listbox" aria-label="Mention a coworker">
+                      {mention.options.map((p, i) => (
+                        <li
+                          key={p.id}
+                          id={"mention-" + i}
+                          role="option"
+                          aria-selected={i === mention.active}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            pickMention(p);
+                          }}
+                        >
+                          {p.id === "all" ? (
+                            <span className="all-icon"><AtSign size={18} /></span>
+                          ) : (
+                            <Avatar id={p.id} provider={p.provider} size={30} />
+                          )}
+                          <span>
+                            <strong>@{p.handle}</strong>
+                            <small>{p.name} · {p.detail}</small>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                   <form
                     className="composer"
@@ -1309,14 +1495,38 @@ export default function Workspace() {
                       }
                       rows={1}
                       value={drafts[selected] || ""}
+                      role="combobox"
+                      aria-expanded={mention.open}
+                      aria-controls="mention-menu"
+                      aria-autocomplete="list"
+                      aria-activedescendant={mention.open ? "mention-" + mention.active : undefined}
                       onChange={(e) => {
                         const value = e.currentTarget.value;
                         const conversation = selected;
+                        setCaret(e.currentTarget.selectionStart ?? value.length);
                         setDrafts((v) => ({ ...v, [conversation]: value }));
                       }}
+                      onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
                       onKeyDown={(e) => {
                         if (e.nativeEvent.isComposing || e.keyCode === 229)
                           return;
+                        if (mention.open) {
+                          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                            e.preventDefault();
+                            mention.move(e.key === "ArrowDown" ? 1 : -1);
+                            return;
+                          }
+                          if (e.key === "Enter" || e.key === "Tab") {
+                            e.preventDefault();
+                            pickMention(mention.options[mention.active]);
+                            return;
+                          }
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            mention.dismiss();
+                            return;
+                          }
+                        }
                         if (
                           e.key === "Enter" &&
                           (e.ctrlKey ||
@@ -1350,7 +1560,7 @@ export default function Workspace() {
                 </>
               ) : (
                 <div className="welcome">
-                  <img src="/mace-mark.svg" width="90" height="90" alt="" />
+                  <MaceMark className="welcome-mark" title="" />
                   <h2>
                     Your agents.
                     <br />
@@ -1738,14 +1948,51 @@ export default function Workspace() {
             ) : page === "settings" ? (
               <>
                 <h1>Settings.</h1>
+                <section className="setting appearance">
+                  <div>
+                    <h2>Theme</h2>
+                    <p>
+                      Every theme comes from the MACE mark. Auto follows your
+                      device between Signal and Ink.
+                    </p>
+                  </div>
+                  <div className="theme-grid" role="radiogroup" aria-label="Theme">
+                    {[
+                      { id: "auto" as const, name: "Auto", note: "Follows your device." },
+                      ...palettes,
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        role="radio"
+                        aria-checked={pref === p.id}
+                        className="theme-card"
+                        data-preview={p.id === "auto" ? resolve("auto") : p.id}
+                        onClick={() => setPref(p.id)}
+                      >
+                        <span className="theme-preview" aria-hidden="true">
+                          <i className="tp-rail" />
+                          <i className="tp-in" />
+                          <i className="tp-out" />
+                          <i className="tp-in short" />
+                        </span>
+                        <strong>{p.name}</strong>
+                        <small>{p.note}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
                 <section className="setting">
                   <div>
-                    <h2>Appearance</h2>
-                    <p>Choose what feels comfortable.</p>
+                    <h2>Chat wallpaper</h2>
+                    <p>A quiet pattern of the MACE shapes behind conversations.</p>
                   </div>
-                  <button className="secondary" onClick={() => setDark(!dark)}>
-                    {dark ? <Sun size={18} /> : <Moon size={18} />}Switch to{" "}
-                    {dark ? "light" : "dark"}
+                  <button
+                    className="secondary"
+                    role="switch"
+                    aria-checked={wallpaper}
+                    onClick={() => setWallpaperOn(!wallpaper)}
+                  >
+                    {wallpaper ? "Pattern on" : "Plain"}
                   </button>
                 </section>
                 <section className="setting">
@@ -1866,7 +2113,7 @@ export default function Workspace() {
             ) : (
               <>
                 <div className="homeintro">
-                  <img src="/mace-mark.svg" width="56" height="56" alt="" />
+                  <MaceMark className="intro-mark" title="" />
                   <h1>
                     Tell your machine.
                     <br />

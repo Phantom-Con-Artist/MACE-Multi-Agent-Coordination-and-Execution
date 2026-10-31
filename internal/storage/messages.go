@@ -90,3 +90,44 @@ func (s *Store) Messages(ctx context.Context, room string, before, after int64, 
 	}
 	return out, more, nil
 }
+
+// InboxRow summarizes one conversation for the chat list.
+type InboxRow struct {
+	Room   string
+	Latest StoredMessage
+	Unread int
+}
+
+// Inbox returns the newest message of every conversation and how many
+// messages from others arrived after the reader's last seen sequence.
+func (s *Store) Inbox(ctx context.Context, seen map[string]int64) ([]InboxRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT m.room, m.seq, m.data FROM messages m JOIN (SELECT room, MAX(seq) AS s FROM messages GROUP BY room) l ON m.seq = l.s`)
+	if err != nil {
+		return nil, err
+	}
+	out := []InboxRow{}
+	for rows.Next() {
+		var r InboxRow
+		var data string
+		if err := rows.Scan(&r.Room, &r.Latest.Seq, &data); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		r.Latest.Data = json.RawMessage(data)
+		out = append(out, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		after, ok := seen[out[i].Room]
+		if !ok {
+			continue
+		}
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE room = ? AND seq > ? AND json_extract(data, '$.sender') <> 'you'`, out[i].Room, after).Scan(&out[i].Unread); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}

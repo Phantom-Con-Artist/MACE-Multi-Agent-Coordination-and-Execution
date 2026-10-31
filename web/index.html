@@ -2,11 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/mace-mark.svg" />
+    <link rel="icon" type="image/svg+xml" href="/brand/mace-icon.svg" />
+    <link rel="preload" href="/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <title>MACE — Multi-Agent Coordination and Execution</title>
+    <meta name="theme-color" content="#161112" />
+    <meta name="description" content="MACE runs your CLI agents on your own computer and lets you work with them from any screen." />
+    <title>MACE · Multi Agent Coordination and Execution</title>
+    <script>
+      // Apply the saved palette before first paint, so a dark theme never flashes light.
+      (function () {
+        var p = "auto", w = "pattern";
+        try { p = localStorage.getItem("mace-palette") || (localStorage.getItem("mace-theme") === "dark" ? "ink" : localStorage.getItem("mace-theme") === "light" ? "signal" : "auto"); w = localStorage.getItem("mace-wallpaper") || w; } catch (e) {}
+        if (p === "auto") p = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "ink" : "signal";
+        var d = document.documentElement;
+        d.dataset.palette = p;
+        d.dataset.theme = p === "ink" || p === "carbon" ? "dark" : "light";
+        d.dataset.wallpaper = w;
+      })();
+    </script>
   </head>
-  <body class="bg-neutral-950 text-neutral-50 antialiased">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

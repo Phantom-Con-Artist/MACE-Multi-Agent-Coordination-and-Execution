@@ -132,6 +132,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/chats/{room}/continue", handler.continueConversation)
 		r.Post("/pause-all", handler.pauseAll)
 		r.Get("/stream", handler.stream)
+		r.Post("/inbox", handler.inbox)
+		r.Get("/chats/{room}/receipts", handler.receipts)
 		r.Post("/presence", handler.presencePing)
 		r.Post("/presence/leave", handler.presenceLeave)
 		r.Get("/peers", handler.peers)
