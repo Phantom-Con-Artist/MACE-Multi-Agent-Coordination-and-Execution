@@ -323,9 +323,11 @@ func (c settings) start() error {
 		cleanup()
 		return e
 	}
-	// Under systemd this output goes to the journal, which administrators can
-	// read, so the token and links stay out of it; mace info prints them.
-	if os.Getenv("INVOCATION_ID") == "" {
+	// Under the service this output goes to the journal, which administrators
+	// can read, so the token and links stay out of it; mace info prints them.
+	// The unit sets MACE_SERVICE; INVOCATION_ID is not used because desktop
+	// sessions pass it on to every terminal.
+	if os.Getenv("MACE_SERVICE") == "" {
 		bootstrap.Banner(token, c.Host, c.Port, c.Log)
 	}
 	fmt.Printf("Server ready (PID %d). State: %s\n", pid, c.State)

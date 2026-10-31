@@ -37,6 +37,7 @@ func (c settings) unit(executable, path string) string {
 	fmt.Fprintf(&b, "ExecStop=%s stop\n", quoteUnit(executable))
 	b.WriteString("Restart=on-failure\nRestartSec=5\nTimeoutStartSec=40\n")
 	fmt.Fprintf(&b, "Environment=%s\n", quoteUnit("PATH="+path))
+	b.WriteString("Environment=MACE_SERVICE=1\n")
 	for _, key := range []string{"MACE_HOME", "MACE_PID_FILE", "MACE_LOG_FILE", "MACE_DB_PATH", "MACE_WEB_DIR", "MACE_DAEMON"} {
 		if v := os.Getenv(key); v != "" {
 			fmt.Fprintf(&b, "Environment=%s\n", quoteUnit(key+"="+v))

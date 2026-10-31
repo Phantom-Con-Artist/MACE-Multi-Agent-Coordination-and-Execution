@@ -55,6 +55,7 @@ func TestServiceUnitCarriesPathAndSettings(t *testing.T) {
 		"Environment=PATH=/home/me/.local/bin:/usr/bin",
 		"Environment=MACE_HOME=" + home,
 		"Restart=on-failure",
+		"Environment=MACE_SERVICE=1",
 		"WantedBy=default.target",
 	} {
 		if !strings.Contains(u, want) {
