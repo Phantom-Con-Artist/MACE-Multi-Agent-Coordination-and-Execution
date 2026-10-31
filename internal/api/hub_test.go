@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // hubAndWorker joins a worker to a hub and starts one scripted agent on the
@@ -261,5 +263,31 @@ func TestOutdatedMachinesAreFlaggedUntilTheyUpdate(t *testing.T) {
 	hub.s.handler.checkNode(ctx, n, 0) // the next check sees the update
 	if hub.nodes(t)["worker"].Outdated {
 		t.Fatal("the flag should clear once the machine reports the current version")
+	}
+}
+
+func TestAgentsOnOneMachineReceiveASharedFileOnce(t *testing.T) {
+	hub, _, agent, _ := hubAndWorker(t)
+	node, _, _ := strings.Cut(agent, "::")
+	src := filepath.Join(t.TempDir(), "notes.md")
+	os.WriteFile(src, []byte("plan"), 0600)
+	room := "team-room"
+	hub.s.handler.postMessage(context.Background(), &Message{ID: newID(), Room: room, Sender: "you", File: strings.TrimPrefix(src, "/"), At: time.Now().UTC(), Delivery: map[string]string{}})
+
+	// Four agents on the worker start their turns at the same moment.
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := hub.s.handler.shareFiles(context.Background(), room, node); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	sent, _ := hub.s.handler.store.Documents(context.Background(), "transfer")
+	if len(sent) != 1 {
+		t.Fatalf("the worker should receive the file once, got %d copies", len(sent))
 	}
 }

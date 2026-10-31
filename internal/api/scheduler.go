@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -812,9 +813,15 @@ func (h *APIHandler) wakeAll(ctx context.Context, room, text string) (Message, e
 	return m, h.dispatch(ctx, room, m)
 }
 
+var shareLocks sync.Map
+
 // shareFiles copies files attached in a conversation to a connected host once,
-// and returns prompt lines naming the copies on that host.
+// and returns prompt lines naming the copies on that host. Several agents on
+// one host start their turns together, so the copying is done one at a time.
 func (h *APIHandler) shareFiles(ctx context.Context, room, peer string) (string, error) {
+	lock, _ := shareLocks.LoadOrStore(h.selfNode().ID+"|"+room+"|"+peer, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
 	rows, _, err := h.store.Messages(ctx, room, 0, 0, 40)
 	if err != nil {
 		return "", err
