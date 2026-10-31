@@ -70,6 +70,12 @@ func (h *APIHandler) machineProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusUnauthorized && p.Node != "" {
+		// A joined machine refuses a signed request only when its MACE is
+		// older than this one and does not offer that yet.
+		http.Error(w, p.Name+" runs an older MACE that does not offer this yet. Update it there: git pull && make install && systemctl --user restart mace", 502)
+		return
+	}
 	for _, k := range responseHeaders {
 		if v := res.Header.Get(k); v != "" {
 			w.Header().Set(k, v)
