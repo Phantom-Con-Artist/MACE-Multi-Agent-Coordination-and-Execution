@@ -1315,3 +1315,159 @@
     animation: none;
   }
 }
+
+/* Agents at work. A work card is shaped like the agent's reply bubble, so it
+   reads as the agent composing. Steps arrive with a short rise; the running
+   step spins until it turns into a check. */
+.app .work-card {
+  min-width: min(260px, 84%);
+  animation: safety-in 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.app .work-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 20px;
+}
+.app .work-head .sender {
+  margin: 0;
+}
+.app .typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.app .typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  opacity: 0.35;
+  animation: typing 1.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.app .typing i:nth-child(2) {
+  animation-delay: 160ms;
+}
+.app .typing i:nth-child(3) {
+  animation-delay: 320ms;
+}
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.app .live-steps,
+.app .steps ol {
+  list-style: none;
+  margin: 10px 0 2px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.app .step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--font-secondary);
+  line-height: 1.45;
+  animation: step-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.app .step-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.app .step-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app .step-title code {
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--soft);
+}
+.app .step-state {
+  display: grid;
+  place-items: center;
+  color: var(--green);
+}
+.app .step[data-state="running"] .step-title {
+  font-weight: 600;
+}
+.app .step[data-state="running"] .step-icon {
+  color: var(--green);
+}
+.app .step[data-state="failed"] .step-state,
+.app .step[data-state="failed"] .step-icon {
+  color: var(--error-text);
+}
+.app .step-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--green);
+  animation: spin 800ms linear infinite;
+}
+.app .step-more {
+  color: var(--muted);
+  font-size: var(--font-small);
+  padding-left: 30px;
+}
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.app .steps {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+.app .steps summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 600;
+  padding: 4px 0;
+  border-radius: 6px;
+}
+.app .steps summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.app .steps .step {
+  animation: none;
+}
+.app .load-older {
+  display: block;
+  margin: 8px auto 4px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--text);
+  font-size: var(--font-small);
+}

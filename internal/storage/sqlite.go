@@ -109,6 +109,12 @@ func (s *Store) migrate() error {
 var migrations = []string{
 	baseSchema,
 	`CREATE INDEX IF NOT EXISTS idx_agent_events_timestamp ON agent_events(timestamp);`,
+	// Messages move out of the generic document table so a conversation can be
+	// paged and read incrementally by sequence.
+	`CREATE TABLE messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, room TEXT NOT NULL, data TEXT NOT NULL);
+	CREATE INDEX idx_messages_room_seq ON messages(room, seq);
+	INSERT INTO messages(id, room, data) SELECT id, substr(kind, 9), data FROM documents WHERE kind LIKE 'message:%' ORDER BY rowid;
+	DELETE FROM documents WHERE kind LIKE 'message:%';`,
 }
 
 const baseSchema = `
@@ -304,6 +310,31 @@ func (s *Store) ListAgents(ctx context.Context) ([]*protocol.AgentProcess, error
 	}
 
 	return results, rows.Err()
+}
+
+// AppendEvents stores a batch of events in one transaction.
+func (s *Store) AppendEvents(ctx context.Context, events []*protocol.AgentEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO agent_events (event_id, agent_id, type, data, timestamp, sequence, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+	for _, e := range events {
+		metaJSON, _ := json.Marshal(e.Metadata)
+		if _, err := stmt.ExecContext(ctx, e.EventID, e.AgentID, string(e.Type), e.Data, e.Timestamp, e.Sequence, string(metaJSON)); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // AppendEvent stores an agent streaming output or status event.

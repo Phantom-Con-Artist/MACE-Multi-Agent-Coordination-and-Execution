@@ -119,16 +119,16 @@ func (h *APIHandler) peerSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, out)
 }
-func (h *APIHandler) peerTurn(ctx context.Context, peer, id, prompt string) (string, error) {
+func (h *APIHandler) peerTurn(ctx context.Context, peer, id string, prompts turnPrompt) (turnResult, error) {
 	var p Peer
 	if e := h.store.Document(ctx, "peer", peer, &p); e != nil {
-		return "", e
+		return turnResult{}, e
 	}
-	var out struct {
-		Text string `json:"text"`
-	}
-	e := h.peerRequest(ctx, p, "/sessions/"+url.PathEscape(id)+"/turn", map[string]string{"prompt": prompt}, &out)
-	return out.Text, e
+	var out turnResult
+	// prompt keeps hosts on the previous protocol working; they ignore full and delta.
+	body := map[string]string{"prompt": prompts.Full, "full": prompts.Full, "delta": prompts.Delta}
+	e := h.peerRequest(ctx, p, "/sessions/"+url.PathEscape(id)+"/turn", body, &out)
+	return out, e
 }
 
 type Transfer struct {

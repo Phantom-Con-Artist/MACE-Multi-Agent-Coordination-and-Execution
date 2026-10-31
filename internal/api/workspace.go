@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"mace/pkg/protocol"
 	"net/http"
@@ -11,15 +10,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type Session struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	Handle    string `json:"handle,omitempty"`
 	Provider  string `json:"provider"`
+	Model     string `json:"model,omitempty"`
 	Directory string `json:"working_dir"`
 	Status    string `json:"status"`
+	// NativeSession is the CLI's own session ID, shared by every conversation
+	// this coworker is in. NativeDir is the folder it was created in; CLIs that
+	// key sessions by folder start fresh when the folder changes.
+	NativeSession string `json:"native_session,omitempty"`
+	NativeDir     string `json:"native_dir,omitempty"`
 }
 type Provider struct {
 	ID        string `json:"id"`
@@ -97,6 +102,8 @@ func (h *APIHandler) sessions(w http.ResponseWriter, r *http.Request) {
 	s.Directory = absolute
 	s.ID = "session_" + newID()
 	s.Status = "ready"
+	s.Handle = h.nextHandle(r.Context(), s.Provider, "")
+	s.NativeSession, s.NativeDir = "", ""
 	if e := h.store.PutDocument(r.Context(), "session", s.ID, s); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
@@ -116,186 +123,6 @@ func (h *APIHandler) activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, v)
-}
-
-// turn runs one native CLI invocation. Conversation context lives in Mace, so each
-// invocation receives the transcript and exits; no TUI or stdin prompt knowledge is needed.
-//
-// origin is "local" for conversations run by this host and "peer" for turns a
-// connected host requested. The presence guard only stops local work; peer turns
-// stop when the requesting host cancels or its connection drops.
-func (h *APIHandler) turn(ctx context.Context, id, prompt, origin string) (string, error) {
-	// Wait for capacity before taking the lifecycle lock, so stop and terminate
-	// stay responsive while many agents are queued.
-	if e := h.supervisor.AcquireSlot(ctx); e != nil {
-		return "", e
-	}
-	reserved := true
-	defer func() {
-		if reserved {
-			h.supervisor.ReleaseSlot()
-		}
-	}()
-	h.lifecycleMu.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			h.lifecycleMu.Unlock()
-		}
-	}()
-	var s Session
-	if e := h.store.Document(ctx, "session", id, &s); e != nil {
-		return "", fmt.Errorf("agent session unavailable: %w", e)
-	}
-	if s.Status == "stopped" || s.Status == "terminated" || s.Status == "removed" {
-		return "", fmt.Errorf("agent is %s; resume it before chatting", s.Status)
-	}
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	prompt = agentInstructions(s) + "\n" + prompt
-	h.sessionMu.Lock()
-	if h.activeSessions[id] {
-		h.sessionMu.Unlock()
-		return "", errors.New("agent is already replying in another conversation")
-	}
-	h.activeSessions[id] = true
-	h.sessionMu.Unlock()
-	defer func() { h.sessionMu.Lock(); delete(h.activeSessions, id); h.sessionMu.Unlock() }()
-	command := s.Provider
-	var args []string
-	switch s.Provider {
-	case "codex":
-		args = []string{"exec", "--json", "--skip-git-repo-check", prompt}
-	case "claude":
-		// stream-json reports progress while working, which the idle limit relies on.
-		args = []string{"-p", "--output-format", "stream-json", "--verbose", prompt}
-	case "agy":
-		args = []string{"--print", prompt, "--output-format", "text"}
-	case "muse":
-		args = []string{"exec", prompt}
-	case "diagnostic":
-		if os.Getenv("MACE_TEST_MODE") != "1" {
-			return "", errors.New("diagnostic disabled")
-		}
-		command = "cat"
-	default:
-		return "", errors.New("unsupported agent adapter")
-	}
-	s.Status = "replying"
-	h.store.PutDocument(context.Background(), "session", s.ID, s)
-	defer func() {
-		var current Session
-		if h.store.Document(context.Background(), "session", s.ID, &current) == nil && current.Status == "replying" {
-			current.Status = "ready"
-			h.store.PutDocument(context.Background(), "session", s.ID, current)
-		}
-	}()
-	launch := protocol.AgentLaunchRequest{Name: s.Name + " reply", Command: command, Args: args, WorkingDir: s.Directory, TimeoutSeconds: int(turnLimit().Seconds()), Labels: map[string]string{"session": id, "origin": origin}, Reserved: true}
-	if s.Provider == "claude" || s.Provider == "codex" {
-		launch.IdleTimeoutSeconds = int(idleLimit().Seconds())
-	}
-	reserved = false
-	proc, e := h.supervisor.StartAgent(ctx, launch)
-	if e != nil {
-		return "", e
-	}
-	h.audit(id, "TURN_STARTED", proc.ID, map[string]any{"session": id})
-	if s.Provider == "diagnostic" {
-		h.supervisor.SendInput(proc.ID, "Diagnostic reply. [GOAL_COMPLETE]\n")
-	}
-	h.supervisor.CloseInput(proc.ID)
-	h.lifecycleMu.Unlock()
-	locked = false
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			h.supervisor.StopAgent(proc.ID, "SIGTERM", time.Second)
-			return "", ctx.Err()
-		case <-ticker.C:
-			p, e := h.supervisor.GetAgent(proc.ID)
-			if e != nil {
-				return "", e
-			}
-			if !p.Status.IsTerminal() {
-				continue
-			}
-			stdout, stderrLines, e := h.processOutput(ctx, proc.ID)
-			if e != nil {
-				return "", e
-			}
-			var result, stderr strings.Builder
-			for _, line := range stderrLines {
-				stderr.WriteString(line)
-				stderr.WriteByte('\n')
-			}
-			for _, line := range stdout {
-				if s.Provider == "diagnostic" || s.Provider == "agy" || s.Provider == "muse" {
-					result.WriteString(line)
-					result.WriteByte('\n')
-					continue
-				}
-				var obj map[string]any
-				if json.Unmarshal([]byte(line), &obj) != nil {
-					continue
-				}
-				if s.Provider == "claude" {
-					if obj["type"] != "result" {
-						continue
-					}
-					if failed, ok := obj["is_error"].(bool); ok && failed {
-						return "", fmt.Errorf("Claude Code: %v", obj["result"])
-					}
-					if text, ok := obj["result"].(string); ok {
-						result.WriteString(text)
-					}
-				} else if obj["type"] == "item.completed" {
-					if item, ok := obj["item"].(map[string]any); ok && item["type"] == "agent_message" {
-						if text, ok := item["text"].(string); ok {
-							result.WriteString(text)
-							result.WriteByte('\n')
-						}
-					}
-				}
-			}
-			if p.ExitCode != nil && *p.ExitCode != 0 {
-				if p.Error != "" {
-					return "", fmt.Errorf("%s was stopped: %s", s.Name, p.Error)
-				}
-				return "", fmt.Errorf("%s exited (%d): %s", s.Name, *p.ExitCode, truncate(stderr.String(), 3000))
-			}
-			if strings.TrimSpace(result.String()) == "" {
-				return "", errors.New("agent returned no response; check host activity and provider login")
-			}
-			h.audit(id, "TURN_COMPLETED", proc.ID, map[string]any{"session": id})
-			return strings.TrimSpace(result.String()), nil
-		}
-	}
-}
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[len(s)-n:]
-	}
-	return s
-}
-func (h *APIHandler) remoteTurn(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Prompt string `json:"prompt"`
-	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req) != nil || req.Prompt == "" {
-		http.Error(w, "prompt required", 400)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), turnLimit())
-	defer cancel()
-	reply, e := h.turn(ctx, routeParam(r, "id"), req.Prompt, "peer")
-	if e != nil {
-		http.Error(w, e.Error(), 502)
-		return
-	}
-	writeJSON(w, 200, map[string]string{"text": reply})
 }
 
 type DesktopApp struct {

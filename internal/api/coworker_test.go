@@ -11,6 +11,7 @@ import (
 
 func TestContinuousMembershipRolesAndGroupRemoval(t *testing.T) {
 	t.Setenv("MACE_TEST_MODE", "1")
+	t.Setenv("MACE_CONTINUOUS_GAP_SECONDS", "0.05")
 	s, sup, store := setupTestServer(t, "secret")
 	defer store.Close()
 	defer sup.Close()
@@ -29,6 +30,14 @@ func TestContinuousMembershipRolesAndGroupRemoval(t *testing.T) {
 	if call(t, s, "POST", "/api/v1/chats/"+group.ID+"/start", map[string]any{}, nil) != 201 {
 		t.Fatal("continuous discussion should start without a typed prompt")
 	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			rows, _, _ := store.Messages(context.Background(), group.ID, 0, 0, 100)
+			for _, r := range rows {
+				t.Log(string(r.Data))
+			}
+		}
+	})
 	before := waitRun(t, s, group.ID, func(r Run) bool { return r.Status == "running" && r.Replies >= 1 })
 	if call(t, s, "POST", "/api/v1/rooms/"+group.ID+"/members/"+b.ID+"/remove", map[string]any{}, &group) != 200 {
 		t.Fatal("remove member")
@@ -49,11 +58,11 @@ func TestContinuousMembershipRolesAndGroupRemoval(t *testing.T) {
 		t.Fatal("add coworker during a run")
 	}
 	waitRun(t, s, group.ID, func(r Run) bool { return r.Replies >= before.Replies+4 })
-	messages, _ := store.Documents(context.Background(), "message:"+group.ID)
+	messages, _, _ := store.Messages(context.Background(), group.ID, 0, 0, 1000)
 	foundC := false
 	for _, raw := range messages {
 		var m Message
-		json.Unmarshal(raw, &m)
+		json.Unmarshal(raw.Data, &m)
 		if m.Sender == c.ID {
 			foundC = true
 		}
@@ -90,7 +99,7 @@ func TestContinuousMembershipRolesAndGroupRemoval(t *testing.T) {
 	if !saved.Removed {
 		t.Fatal("removal not persisted")
 	}
-	history, _ := store.Documents(context.Background(), "message:"+group.ID)
+	history, _, _ := store.Messages(context.Background(), group.ID, 0, 0, 1000)
 	if len(history) < 2 {
 		t.Fatal("group history was deleted")
 	}
@@ -106,9 +115,15 @@ func TestCoworkerContextAndNativeBootstrap(t *testing.T) {
 	store.PutDocument(context.Background(), "session", b.ID, b)
 	room := Room{ID: "team", Name: "Project team", Members: []string{a.ID, b.ID}, Roles: map[string]string{a.ID: "Review accessibility"}}
 	store.PutDocument(context.Background(), "room", room.ID, room)
-	raw, _ := json.Marshal(Message{Sender: "you", Text: strings.Repeat("earlier context ", 9000) + "latest task stays available"})
-	prompt := s.handler.conversationPrompt(context.Background(), room.ID, a.ID, room.Members, Policy{Mode: "continuous"}, []json.RawMessage{raw})
-	for _, term := range []string{"MACE GROUP", "Ari", "Bo", "Review accessibility", "Unassigned", "coworkers", "without waiting", "latest task stays available"} {
+	s.handler.ensureHandles(context.Background())
+	task := Message{ID: newID(), Room: room.ID, Sender: "you", Text: strings.Repeat("earlier context ", 9000) + "latest task stays available"}
+	s.handler.postMessage(context.Background(), &task)
+	prompts, last, _ := s.handler.buildPrompts(context.Background(), &turnRequest{Member: a.ID, Room: room.ID}, room.Members, &room, Policy{Mode: "continuous"})
+	prompt := prompts.Full
+	if prompts.Delta != "" || last != task.Seq {
+		t.Fatal("a first turn has no cursor yet, so only the full form applies")
+	}
+	for _, term := range []string{"MACE GROUP", "Ari", "Bo", "@codex", "Review accessibility", "Unassigned", "coworkers", "without waiting", "latest task stays available"} {
 		if !strings.Contains(prompt, term) {
 			t.Fatal("missing coworker context", term)
 		}
@@ -122,14 +137,14 @@ func TestCoworkerContextAndNativeBootstrap(t *testing.T) {
 	if e := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0700); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.handler.turn(context.Background(), a.ID, prompt, "local"); e != nil {
+	if _, e := s.handler.turn(context.Background(), a.ID, prompts, "local", nil); e != nil {
 		t.Fatal(e)
 	}
 	sent, e := os.ReadFile(capture)
 	if e != nil {
 		t.Fatal(e)
 	}
-	for _, term := range []string{"Multi Agent Coordination and Execution", "AI coworker", "Native working folder", "MACE GROUP", "Review accessibility", "latest task stays available"} {
+	for _, term := range []string{"Multi Agent Coordination and Execution", "AI coworker", "MACE AWARENESS", "Working folder", "Group \"Project team\"", "MACE GROUP", "Review accessibility", "latest task stays available", "[PASS]"} {
 		if !strings.Contains(string(sent), term) {
 			t.Fatal("native CLI did not receive", term)
 		}

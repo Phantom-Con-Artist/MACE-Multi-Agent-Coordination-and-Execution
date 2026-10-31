@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"time"
 )
 
 func (h *APIHandler) removeGroup(w http.ResponseWriter, r *http.Request) {
@@ -22,11 +21,9 @@ func (h *APIHandler) removeGroup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, e.Error(), 500)
 		return
 	}
-	h.runMu.Lock()
-	if cancel := h.runs[id]; cancel != nil {
-		cancel(nil)
-	}
-	h.runMu.Unlock()
+	h.roomMu.Unlock()
+	h.pauseRoom(id, nil)
+	h.roomMu.Lock()
 	h.audit("you", "GROUP_REMOVED", id, map[string]any{"history_retained": true})
 	writeJSON(w, 200, map[string]bool{"removed": true})
 }
@@ -88,13 +85,9 @@ func (h *APIHandler) startDiscussion(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Choose Continuous mode to start an open conversation.", 400)
 		return
 	}
-	m := Message{ID: newID(), Room: id, Sender: "mace", Text: "Continuous conversation started. The team can talk and collaborate without waiting for another message.", At: time.Now().UTC(), Delivery: map[string]string{}}
-	if e := h.beginConversation(id, group.Members, m); e != nil {
+	m, e := h.wakeAll(r.Context(), id, "Continuous conversation started. The team can talk and collaborate without waiting for another message.")
+	if e != nil {
 		http.Error(w, e.Error(), 409)
-		return
-	}
-	if e := h.store.PutDocument(r.Context(), "message:"+id, m.ID, m); e != nil {
-		http.Error(w, e.Error(), 500)
 		return
 	}
 	writeJSON(w, 201, m)
@@ -103,34 +96,27 @@ func (h *APIHandler) startDiscussion(w http.ResponseWriter, r *http.Request) {
 // Stopping one employee does not stop the rest of a group. Membership edits are
 // observed on the next turn, and an in-flight reply from that member is cancelled.
 func (h *APIHandler) stopMemberRuns(id string, remove bool) {
+	h.stopMember(id)
+	if !remove {
+		return
+	}
 	h.roomMu.Lock()
 	defer h.roomMu.Unlock()
-	h.runMu.Lock()
-	if cancel := h.runs[id]; cancel != nil {
-		cancel(nil)
-	}
-	h.runMu.Unlock()
 	raw, _ := h.store.Documents(context.Background(), "room")
 	for _, b := range raw {
 		var group Room
 		json.Unmarshal(b, &group)
-		found := false
+		if !containsID(group.Members, id) {
+			continue
+		}
 		members := []string{}
 		for _, member := range group.Members {
-			if member == id {
-				found = true
-			} else {
+			if member != id {
 				members = append(members, member)
 			}
 		}
-		if !found {
-			continue
-		}
-		if remove {
-			group.Members = members
-			delete(group.Roles, id)
-			h.store.PutDocument(context.Background(), "room", group.ID, group)
-		}
-		h.cancelMemberTurn(group.ID, id)
+		group.Members = members
+		delete(group.Roles, id)
+		h.store.PutDocument(context.Background(), "room", group.ID, group)
 	}
 }

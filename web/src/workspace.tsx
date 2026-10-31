@@ -10,6 +10,7 @@ import {
 import PublicSite from "./public-site";
 import { Button } from "@/components/ui/button";
 const AgentMessage = lazy(() => import("./agent-message"));
+import { StepList, WorkCard, type Step } from "./agent-work";
 import {
   MessageCircle,
   Home,
@@ -46,6 +47,8 @@ import {
 type Agent = {
   id: string;
   name: string;
+  handle?: string;
+  model?: string;
   provider?: string;
   status: string;
   working_dir: string;
@@ -54,17 +57,35 @@ type Agent = {
 type Room = { id: string; name: string; members: string[]; roles?:Record<string,string> };
 type Msg = {
   id: string;
+  room?: string;
+  seq?: number;
   sender: string;
+  kind?: string;
   text: string;
   file?: string;
   at: string;
   delivery?: Record<string, string>;
+  mentions?: string[];
+  activity?: Step[];
 };
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
 type Policy = { mode: string; goal: string; limit: number };
-type Run = { id: string; status: string; replies: number; error?: string; active_member?:string };
+type Run = { id: string; status: string; replies: number; error?: string; active_member?:string; active_members?: string[] };
+// Messages arrive from the stream and from paged loads; keep one copy of each,
+// in conversation order.
+const mergeMessages = (list: Msg[], incoming: Msg[]) => {
+  const byID = new Map(list.map((m) => [m.id, m]));
+  for (const m of incoming) byID.set(m.id, { ...byID.get(m.id), ...m });
+  return [...byID.values()].sort(
+    (a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity),
+  );
+};
+const joinNames = (names: string[]) =>
+  names.length < 3
+    ? names.join(" and ")
+    : names.slice(0, -1).join(", ") + ", and " + names.at(-1);
 type Audit = {
   id: number;
   actor: string;
@@ -186,6 +207,11 @@ export default function Workspace() {
     [node, setNode] = useState<Record<string, unknown>>({});
   const [selected, select] = useState(""),
     [messages, setMessages] = useState<Msg[]>([]),
+    [olderAvailable, setOlderAvailable] = useState(false),
+    [streamOpen, setStreamOpen] = useState(false),
+    [reloadKey, setReloadKey] = useState(0),
+    // Live tool steps of agents working right now, by conversation and agent.
+    [live, setLive] = useState<Record<string, Record<string, Step[]>>>({}),
     [drafts, setDrafts] = useState<Record<string, string>>(() => {
       try {
         return JSON.parse(sessionStorage.getItem("mace-drafts") || "{}");
@@ -219,7 +245,12 @@ export default function Workspace() {
   const messagePane = useRef<HTMLDivElement>(null),
     composer = useRef<HTMLTextAreaElement>(null),
     nearBottom = useRef(true),
-    busyNow = useRef(false);
+    busyNow = useRef(false),
+    selectedRef = useRef(""),
+    streamOpenRef = useRef(false),
+    refreshRef = useRef<() => Promise<void>>(async () => {});
+  selectedRef.current = selected;
+  streamOpenRef.current = streamOpen;
   const search = searches[page] || "";
   const setSearch = (value: string) =>
     setSearches((previous) => ({ ...previous, [page]: value }));
@@ -244,7 +275,11 @@ export default function Workspace() {
     chat = chats.find((c) => c.id === selected),
     room = rooms.find((r) => r.id === selected),
     run = runs.find((r) => r.id === selected),
-    running = run?.status === "running";
+    running = run?.status === "running",
+    liveHere = live[selected] || {},
+    working = [
+      ...new Set([...(run?.active_members || []), ...Object.keys(liveHere)]),
+    ];
   const name = (id: string) =>
     id === "you" ? "You" : id==='mace'?'Mace':all.find((a) => a.id === id)?.name || id;
   const nav = (p: string) => {
@@ -295,6 +330,7 @@ export default function Workspace() {
       setOnline(false);
     }
   }
+  refreshRef.current = refresh;
   useEffect(() => {
     let alive = true;
     async function init() {
@@ -313,7 +349,13 @@ export default function Workspace() {
       }
     }
     void init();
-    const id = setInterval(() => void refresh(), 3000);
+    // With the event stream open, a full refresh is only a slow safety net.
+    let last = Date.now();
+    const id = setInterval(() => {
+      if (streamOpenRef.current && Date.now() - last < 30000) return;
+      last = Date.now();
+      void refreshRef.current();
+    }, 3000);
     return () => {
       alive = false;
       clearInterval(id);
@@ -414,27 +456,102 @@ export default function Workspace() {
       clearInterval(id);
     };
   }, [peers.map((p) => p.id).join(",")]);
+  // Load the newest page; the event stream keeps it current. Polling only
+  // runs while the stream is down.
   useEffect(() => {
     if (!selected) return;
     let alive = true;
-    setMessages([]);
     async function load() {
       try {
-        const m = await api<Msg[]>(
-          "/v1/chats/" + encodeURIComponent(selected) + "/messages",
+        const r = await fetch(
+          "/api/v1/chats/" + encodeURIComponent(selected) + "/messages?limit=100",
         );
-        if (alive) setMessages(m);
+        if (!r.ok) throw Error((await r.text()).trim());
+        const page = (await r.json()) as Msg[];
+        if (!alive) return;
+        setMessages((v) =>
+          mergeMessages(
+            v.filter((m) => m.room === selected || !m.room),
+            page,
+          ),
+        );
+        setOlderAvailable((more) => more || r.headers.get("X-More") === "true");
       } catch {
         if (alive) setOnline(false);
       }
     }
     void load();
-    const id = setInterval(() => void load(), 1000);
+    if (streamOpen) return () => void (alive = false);
+    const id = setInterval(() => void load(), 2000);
     return () => {
       alive = false;
       clearInterval(id);
     };
+  }, [selected, streamOpen, reloadKey]);
+  useEffect(() => {
+    setMessages([]);
+    setOlderAvailable(false);
   }, [selected]);
+  async function loadOlder() {
+    const first = messages.find((m) => m.seq);
+    const pane = messagePane.current;
+    if (!first?.seq || !pane) return;
+    const before = pane.scrollHeight;
+    const r = await fetch(
+      "/api/v1/chats/" +
+        encodeURIComponent(selected) +
+        "/messages?limit=100&before=" +
+        first.seq,
+    );
+    if (!r.ok) throw Error((await r.text()).trim());
+    const page = (await r.json()) as Msg[];
+    setOlderAvailable(r.headers.get("X-More") === "true");
+    setMessages((v) => mergeMessages(v, page));
+    // Keep the reader's place while earlier messages appear above.
+    requestAnimationFrame(() => {
+      pane.scrollTop += pane.scrollHeight - before;
+    });
+  }
+  // One event stream carries messages, runs, sessions, and live agent steps.
+  // EventSource reconnects by itself and resumes from the last event it saw.
+  useEffect(() => {
+    if (!connected) return;
+    const stream = new EventSource("/api/v1/stream");
+    const data = <T,>(e: Event) => JSON.parse((e as MessageEvent).data) as T;
+    stream.onopen = () => setStreamOpen(true);
+    stream.onerror = () => setStreamOpen(false);
+    stream.addEventListener("reset", () => {
+      setLive({});
+      setReloadKey((k) => k + 1);
+      void refreshRef.current();
+    });
+    stream.addEventListener("message", (e) => {
+      const m = data<Msg>(e);
+      if (m.room === selectedRef.current)
+        setMessages((v) => mergeMessages(v, [m]));
+    });
+    stream.addEventListener("run", (e) => {
+      const r = data<Run>(e);
+      setRuns((v) => [...v.filter((x) => x.id !== r.id), r]);
+    });
+    stream.addEventListener("session", (e) => {
+      const s = data<Agent>(e);
+      setAgents((v) => v.map((a) => (a.id === s.id ? { ...a, ...s } : a)));
+    });
+    stream.addEventListener("activity", (e) => {
+      const a = data<{ room: string; member: string; steps?: Step[]; done?: boolean }>(e);
+      setLive((v) => {
+        const roomSteps = { ...(v[a.room] || {}) };
+        if (a.done) delete roomSteps[a.member];
+        else roomSteps[a.member] = a.steps || [];
+        return { ...v, [a.room]: roomSteps };
+      });
+    });
+    return () => {
+      stream.close();
+      setStreamOpen(false);
+    };
+  }, [connected]);
   useEffect(() => {
     if (selected)
       void api<Policy>("/v1/chats/" + encodeURIComponent(selected) + "/policy")
@@ -937,9 +1054,12 @@ export default function Workspace() {
                     <div className="threadtitle">
                       <strong>{chat.name}</strong>
                       <small title={chat.working_dir}>
-                        {running
-                          ? run.active_member?name(run.active_member)+' is working':'Team conversation is running'
-                          : statusLabel(chat.status) +
+                        {working.length
+                          ? joinNames(working.map(name)) +
+                            (working.length === 1 ? " is working" : " are working")
+                          : running
+                            ? "Waiting for the next turn"
+                            : statusLabel(chat.status) +
                             (chat.working_dir
                               ? " · " + folderName(chat.working_dir)
                               : "")}
@@ -997,6 +1117,15 @@ export default function Workspace() {
                       if (nearBottom.current) setUnread(false);
                     }}
                   >
+                    {olderAvailable && (
+                      <button
+                        className="load-older"
+                        disabled={busy}
+                        onClick={() => void action(loadOlder)}
+                      >
+                        Load earlier messages
+                      </button>
+                    )}
                     {!messages.length && (
                       <div className="startnote">
                         What would you like {chat.name} to do?
@@ -1035,6 +1164,7 @@ export default function Workspace() {
                             </Suspense>
                           )}
                         </div>
+                        {m.activity && <StepList steps={m.activity} />}
                         {m.file && <Media path={m.file} />}
                         <small>
                           {Object.values(m.delivery || {}).some(
@@ -1046,11 +1176,14 @@ export default function Workspace() {
                         </small>
                       </article>
                     ))}
-                    {running && (
-                      <div className="work-state" role="status">
-                        Agents are working. You can pause this conversation.
-                      </div>
-                    )}
+                    {working.map((id) => (
+                      <WorkCard
+                        key={id}
+                        name={name(id)}
+                        steps={liveHere[id] || []}
+                        showName={!!room}
+                      />
+                    ))}
                     {run?.status === "interrupted" ? (
                       <div className="run-interrupted" role="status">
                         {/* The reason is already in the conversation as a note. */}
@@ -1121,7 +1254,6 @@ export default function Workspace() {
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (
-                        running ||
                         busyNow.current ||
                         (!(drafts[selected] || "").trim() && !attachment)
                       )
@@ -1145,13 +1277,13 @@ export default function Workspace() {
                             (value) => value !== "delivered",
                           )
                         ) {
-                          setMessages((v) => [...v, m]);
+                          setMessages((v) => mergeMessages(v, [m]));
                           throw Error(
                             "Your message was saved but could not be delivered. Your draft is kept so you can try again.",
                           );
                         }
                         nearBottom.current = true;
-                        setMessages((v) => [...v, m]);
+                        setMessages((v) => mergeMessages(v, [m]));
                         setDrafts((v) => ({ ...v, [selected]: "" }));
                         setAttachment("");
                         await refresh();
@@ -1171,9 +1303,9 @@ export default function Workspace() {
                       aria-describedby="composer-hint"
                       autoCapitalize="sentences"
                       placeholder={
-                        running
-                          ? "Agents are working…"
-                          : "Tell your agents what to do"
+                        room
+                          ? "Message the team"
+                          : "Message " + (chat?.name || "your agent")
                       }
                       rows={1}
                       value={drafts[selected] || ""}
@@ -1205,7 +1337,6 @@ export default function Workspace() {
                       disabled={
                         busy ||
                         !online ||
-                        running ||
                         (!(drafts[selected] || "").trim() && !attachment)
                       }
                     >

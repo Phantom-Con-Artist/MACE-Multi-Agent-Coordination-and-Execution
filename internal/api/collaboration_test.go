@@ -40,7 +40,13 @@ func waitRun(t *testing.T, s *Server, id string, predicate func(Run) bool) Run {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("run did not reach expected state")
+	var last Run
+	s.handler.store.Document(context.Background(), "run", id, &last)
+	rows, _, _ := s.handler.store.Messages(context.Background(), id, 0, 0, 100)
+	for _, r := range rows {
+		t.Log(string(r.Data))
+	}
+	t.Fatalf("run did not reach expected state; last: %+v", last)
 	return Run{}
 }
 func TestCollaborationModesAndLifecycle(t *testing.T) {
@@ -58,18 +64,27 @@ func TestCollaborationModesAndLifecycle(t *testing.T) {
 	call(t, s, "POST", "/api/v1/sessions", map[string]any{"provider": "diagnostic", "working_dir": t.TempDir()}, &b)
 	var room Room
 	call(t, s, "POST", "/api/v1/rooms", map[string]any{"name": "team", "members": []string{a.ID, b.ID}}, &room)
-	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "reply", Limit: 3}, nil)
+	// Both agents start at once; the budget still holds.
+	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "reply", Limit: 1}, nil)
 	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/messages", map[string]any{"text": "work together"}, nil)
 	run := waitRun(t, s, room.ID, func(r Run) bool { return r.Status == "limit_reached" })
-	if run.Replies != 3 {
+	if run.Replies != 1 {
 		t.Fatal(run)
+	}
+	// Without a limit in the way, everyone answers an unaddressed owner message.
+	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "reply", Limit: 5}, nil)
+	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/messages", map[string]any{"text": "everyone please"}, nil)
+	run = waitRun(t, s, room.ID, func(r Run) bool { return r.Status == "completed" })
+	if run.Replies != 2 {
+		t.Fatal("both members should answer once", run)
 	}
 	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "goal", Limit: 5, Goal: "finish diagnostic"}, nil)
 	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/messages", map[string]any{"text": "complete the goal"}, nil)
 	run = waitRun(t, s, room.ID, func(r Run) bool { return r.Status == "goal_reported_complete" })
-	if run.Replies != 1 {
+	if run.Replies < 1 {
 		t.Fatal(run)
 	}
+	t.Setenv("MACE_CONTINUOUS_GAP_SECONDS", "0.05")
 	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "continuous"}, nil)
 	call(t, s, "POST", "/api/v1/chats/"+room.ID+"/messages", map[string]any{"text": "continue"}, nil)
 	waitRun(t, s, room.ID, func(r Run) bool { return r.Status == "running" && r.Replies >= 1 })
@@ -85,7 +100,7 @@ func TestCollaborationModesAndLifecycle(t *testing.T) {
 	if len(room.Members) != 1 || room.Members[0] != b.ID {
 		t.Fatal("removed agent remains in group")
 	}
-	raw, _ := store.Documents(context.Background(), "message:"+room.ID)
+	raw, _, _ := store.Messages(context.Background(), room.ID, 0, 0, 1000)
 	if len(raw) < 8 {
 		t.Fatal("missing conversation history")
 	}
@@ -137,8 +152,12 @@ func TestPeerCollaborationAndFileTransfer(t *testing.T) {
 	id = strings.ReplaceAll(id, ":", "%3A")
 	call(t, local, "POST", "/api/v1/chats/"+id+"/messages", map[string]string{"text": "inspect the artifact", "file": "shared.txt"}, nil)
 	run := waitRun(t, local, strings.ReplaceAll(id, "%3A", ":"), func(r Run) bool { return r.Status != "running" })
-	if run.Status != "limit_reached" || run.Replies != 1 {
+	if run.Status != "completed" || run.Replies != 1 {
 		t.Fatal(run)
+	}
+	var link FileLink
+	if lstore.Document(context.Background(), "filelinks:"+strings.ReplaceAll(id, "%3A", ":"), p.ID+":shared.txt", &link) != nil || link.Destination == "" {
+		t.Fatal("the attachment was not copied to the remote agent's host")
 	}
 	if call(t, local, "POST", "/api/v1/sessions/"+id+"/control", map[string]string{"action": "terminate"}, nil) != 200 {
 		t.Fatal("remote lifecycle failed")

@@ -99,7 +99,7 @@ func (h *APIHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, e.Error(), 500)
 		return
 	}
-	h.cancelMemberTurn(room.ID, id)
+	h.removeFromRoom(room.ID, id)
 	h.audit("you", "MEMBER_REMOVED", room.ID, map[string]any{"member": id})
 	writeJSON(w, 200, room)
 }

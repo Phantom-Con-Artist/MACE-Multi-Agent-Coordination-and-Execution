@@ -131,6 +131,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/chats/{room}/start", handler.startDiscussion)
 		r.Post("/chats/{room}/continue", handler.continueConversation)
 		r.Post("/pause-all", handler.pauseAll)
+		r.Get("/stream", handler.stream)
 		r.Post("/presence", handler.presencePing)
 		r.Post("/presence/leave", handler.presenceLeave)
 		r.Get("/peers", handler.peers)
@@ -217,11 +218,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Stop initiates a graceful shutdown of the HTTP server.
 func (s *Server) Stop(ctx context.Context) error {
-	s.handler.runMu.Lock()
-	for _, cancel := range s.handler.runs {
-		cancel(errShutdown)
-	}
-	s.handler.runMu.Unlock()
+	s.handler.stopAllRuns(errShutdown)
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return s.httpServer.Shutdown(shutdownCtx)

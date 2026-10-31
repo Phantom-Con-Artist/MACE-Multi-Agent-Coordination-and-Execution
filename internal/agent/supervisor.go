@@ -36,6 +36,9 @@ type managedAgent struct {
 	done         chan struct{}
 	lastOutput   atomic.Int64
 	killReason   string
+	onOutput     func(protocol.EventType, string, bool)
+	pendingMu    sync.Mutex
+	pending      []*protocol.AgentEvent
 	seq          atomic.Uint64
 	bytesRead    atomic.Int64
 	bytesWritten atomic.Int64
@@ -222,12 +225,13 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 	}
 
 	managed := &managedAgent{
-		process: proc,
-		cmd:     cmd,
-		stdin:   stdinPipe,
-		ctx:     agentCtx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
+		process:  proc,
+		cmd:      cmd,
+		stdin:    stdinPipe,
+		ctx:      agentCtx,
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		onOutput: req.OnOutput,
 	}
 	managed.lastOutput.Store(time.Now().UnixNano())
 
@@ -263,6 +267,7 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 
 	// Spawn process watcher
 	go s.watchProcess(managed, &streamWg)
+	go s.flushLoop(managed)
 	if req.IdleTimeoutSeconds > 0 {
 		go s.watchIdle(managed, time.Duration(req.IdleTimeoutSeconds)*time.Second)
 	}
@@ -317,12 +322,47 @@ func (s *Supervisor) emitOutput(m *managedAgent, evtType protocol.EventType, tex
 	if partial {
 		event.Metadata = map[string]string{"partial": "true"}
 	}
+	if m.onOutput != nil {
+		m.onOutput(evtType, text, partial)
+	}
 	if s.store != nil {
-		if err := s.store.AppendEvent(context.Background(), event); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to append event to store: %v\n", err)
+		m.pendingMu.Lock()
+		m.pending = append(m.pending, event)
+		full := len(m.pending) >= 500
+		m.pendingMu.Unlock()
+		if full {
+			s.flush(m)
 		}
 	}
 	s.broadcastEvent(event)
+}
+
+// Output is written in batches: one transaction per 100 ms or 500 lines,
+// instead of one per line, so parallel agents do not queue on the writer.
+func (s *Supervisor) flush(m *managedAgent) {
+	m.pendingMu.Lock()
+	batch := m.pending
+	m.pending = nil
+	m.pendingMu.Unlock()
+	if s.store == nil || len(batch) == 0 {
+		return
+	}
+	if err := s.store.AppendEvents(context.Background(), batch); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to append events to store: %v\n", err)
+	}
+}
+
+func (s *Supervisor) flushLoop(m *managedAgent) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.done:
+			return
+		case <-ticker.C:
+			s.flush(m)
+		}
+	}
 }
 
 // watchIdle stops a process that has produced no output for limit.
@@ -354,6 +394,9 @@ func (s *Supervisor) watchProcess(m *managedAgent, streamWg *sync.WaitGroup) {
 	defer m.cancel()
 	// Wait for stdout and stderr readers to finish reading to EOF before calling cmd.Wait()
 	streamWg.Wait()
+	// All output is stored before the process is reported finished, so readers
+	// that wait for a terminal status always see complete output.
+	s.flush(m)
 	err := m.cmd.Wait()
 
 	stoppedAt := time.Now().UTC()

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,15 +21,22 @@ type Room struct {
 	Removed bool              `json:"removed,omitempty"`
 }
 type Message struct {
-	ID       string            `json:"id"`
-	Room     string            `json:"room"`
-	Sender   string            `json:"sender"`
-	Text     string            `json:"text"`
-	File     string            `json:"file,omitempty"`
-	Kind     string            `json:"kind,omitempty"`
-	ClientID string            `json:"client_id,omitempty"`
-	At       time.Time         `json:"at"`
-	Delivery map[string]string `json:"delivery"`
+	ID       string    `json:"id"`
+	Room     string    `json:"room"`
+	Sender   string    `json:"sender"`
+	Text     string    `json:"text"`
+	File     string    `json:"file,omitempty"`
+	Kind     string    `json:"kind,omitempty"`
+	ClientID string    `json:"client_id,omitempty"`
+	At       time.Time `json:"at"`
+	// Seq is the message's position, assigned by storage.
+	Seq         int64             `json:"seq,omitempty"`
+	Mentions    []string          `json:"mentions,omitempty"`
+	MentionsAll bool              `json:"mentions_all,omitempty"`
+	Hop         int               `json:"hop,omitempty"`
+	Wake        bool              `json:"wake,omitempty"`
+	Activity    []Activity        `json:"activity,omitempty"`
+	Delivery    map[string]string `json:"delivery"`
 }
 
 func newID() string { b := make([]byte, 16); rand.Read(b); return hex.EncodeToString(b) }
@@ -78,12 +86,26 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	id := routeParam(r, "room")
 	if r.Method == "GET" {
-		v, e := h.store.Documents(r.Context(), "message:"+id)
+		// Newest page by default; before=<seq> pages back, after=<seq> catches up.
+		q := r.URL.Query()
+		before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
+		after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		rows, more, e := h.store.Messages(r.Context(), id, before, after, limit)
 		if e != nil {
 			http.Error(w, e.Error(), 500)
 			return
 		}
-		writeJSON(w, 200, v)
+		out := make([]Message, 0, len(rows))
+		for _, row := range rows {
+			var m Message
+			if json.Unmarshal(row.Data, &m) == nil {
+				m.Seq = row.Seq
+				out = append(out, m)
+			}
+		}
+		w.Header().Set("X-More", strconv.FormatBool(more))
+		writeJSON(w, 200, out)
 		return
 	}
 	var m Message
@@ -145,8 +167,10 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 			Message string `json:"message"`
 		}
 		if h.store.Document(r.Context(), "client-message:"+id, m.ClientID, &prior) == nil {
-			var existing Message
-			if h.store.Document(r.Context(), "message:"+id, prior.Message, &existing) == nil {
+			if row, e := h.store.MessageByID(r.Context(), prior.Message); e == nil {
+				var existing Message
+				json.Unmarshal(row.Data, &existing)
+				existing.Seq = row.Seq
 				writeJSON(w, 200, existing)
 				return
 			}
@@ -154,8 +178,14 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	m.ID = newID()
 	m.Room = id
-	m.Kind = ""
+	m.Kind, m.Wake, m.Activity, m.Seq = "", false, nil, 0
 	m.At = time.Now().UTC()
+	m.Mentions, m.MentionsAll = parseMentions(m.Text, h.roomHandles(r.Context(), members))
+	if m.Sender != "you" {
+		m.Hop = 1
+	} else {
+		m.Hop = 0
+	}
 	m.Delivery = map[string]string{}
 	if m.File != "" {
 		root, e := os.OpenRoot(h.fileRoot)
@@ -171,7 +201,7 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Close()
 	}
-	if e := h.store.PutDocument(r.Context(), "message:"+id, m.ID, m); e != nil {
+	if _, e := h.postMessage(r.Context(), &m); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
 	}
@@ -179,14 +209,16 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 		h.store.PutDocument(r.Context(), "client-message:"+id, m.ClientID, map[string]string{"message": m.ID})
 	}
 	if h.managed(members) {
-		if e := h.beginConversation(id, members, m); e != nil {
+		// Messages are never refused because agents are busy; each addressed
+		// agent picks this up on its next turn.
+		if e := h.dispatch(r.Context(), id, m); e != nil {
 			m.Delivery["conversation"] = e.Error()
-			h.store.PutDocument(r.Context(), "message:"+id, m.ID, m)
+			h.updateMessage(r.Context(), &m)
 			writeJSON(w, 201, m)
 			return
 		}
 		m.Delivery["conversation"] = "delivered"
-		h.store.PutDocument(r.Context(), "message:"+id, m.ID, m)
+		h.updateMessage(r.Context(), &m)
 		h.audit(m.Sender, "MESSAGE_SENT", id, map[string]any{"message": m.ID, "file": m.File})
 		writeJSON(w, 201, m)
 		return
@@ -209,7 +241,7 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 			m.Delivery[target] = "delivered"
 		}
 	}
-	if e := h.store.PutDocument(r.Context(), "message:"+id, m.ID, m); e != nil {
+	if e := h.updateMessage(r.Context(), &m); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
 	}

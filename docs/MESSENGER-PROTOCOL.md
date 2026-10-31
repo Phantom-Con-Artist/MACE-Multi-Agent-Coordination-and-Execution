@@ -1,4 +1,4 @@
-# Mace collaboration protocol v2
+# Mace collaboration protocol v3
 
 The host is a single-owner trust boundary. Protected endpoints accept the printed Bearer token. POST /api/session exchanges a token for an HttpOnly, SameSite=Strict session cookie. Startup sign-in links put the token in the URL fragment; the browser exchanges it and removes the fragment. Tokens are generated and persisted with mode 0600 unless explicitly configured.
 
@@ -17,6 +17,16 @@ POST /rooms creates a group with name and member IDs. GET/POST /chats/{room}/mes
 GET/POST /chats/{room}/policy configures mode, limit, and goal. reply mode counts total agent responses across members; its default gives each member one turn. goal mode adds the stated goal to context and stops on an agent's [GOAL_COMPLETE] report or the response budget. The completion marker is a self-report, not independent proof. continuous mode takes turns until cancellation or failure. POST /chats/{room}/pause cancels the active run and its native process group. A session can only reply in one conversation at once. New messages during a running conversation are saved with a delivery error; pause first to send a new task.
 
 GET /runs returns persisted progress, reply counts, completion, failure, or pause status. Runs do not resume automatically after a restart. The orchestrator supplies recent messages (up to 40 and 100,000 bytes) to each turn and records normalized replies in the conversation. Native output remains separately inspectable in Activity. Current history presentation polls persisted state.
+
+## Coworkers and conversations (v3)
+
+Each agent session is one coworker with a mention handle (agy, agy-2, muse) and one native CLI session shared by its private chat and every group it joins. Turns resume that session: Antigravity with --conversation, Muse and Claude Code with a session ID Mace chooses, Codex with exec resume. When the CLI starts a new session instead (agy does this silently for an unknown ID), the conversation receives a note that the agent's memory was reset. A fresh session receives the full instructions and recent transcript; a resumed one receives only messages since its read cursor. Every turn carries an awareness block listing the agent's conversations and their latest message.
+
+Each coworker has an inbox and runs one turn at a time; different coworkers work in parallel. Private chat messages run before group work. Who responds: an owner message without mentions wakes every available member; @handle wakes only those members; @all wakes everyone. An agent message wakes only the members it mentions. In continuous mode every other member also gets a paced turn (MACE_CONTINUOUS_GAP_SECONDS, default 20) and rounds continue until paused, a reply fails, or every agent replies [PASS]. A chain of agent-triggered messages stops after 8 hops outside continuous mode. Three near-identical replies in a row pause the conversation. Reply budgets count per owner message, including turns running in parallel. An agent with nothing new to read since its last turn is not run again.
+
+Owner messages are never refused because agents are busy. Agent output is parsed while it streams: tool calls become steps (Read, Edited, Ran, Searched) shown live and kept with the reply as activity. Reply text [PASS] is not posted.
+
+GET /stream is a server-sent event stream of message, run, session, and activity events, resumable with Last-Event-ID; an unknown or expired ID yields a reset event. GET /chats/{room}/messages returns the newest page; before and after page by sequence; X-More reports more history. Remote turns send full and delta prompts and return text, activity, and reset; hosts on the previous protocol still work.
 
 ## Safety and recovery
 

@@ -15,20 +15,26 @@ import (
 )
 
 type APIHandler struct {
-	supervisor     *agent.Supervisor
-	store          *storage.Store
-	nodeInfo       protocol.NodeInfo
-	startTime      time.Time
-	fileRoot       string
-	lifecycleMu    sync.Mutex
-	runMu          sync.Mutex
-	runs           map[string]context.CancelCauseFunc
-	sessionMu      sync.Mutex
-	activeSessions map[string]bool
-	roomMu         sync.Mutex
-	activeTurns    map[string]activeTurn
-	presence       presence
-	sendMu         sync.Mutex
+	supervisor  *agent.Supervisor
+	store       *storage.Store
+	nodeInfo    protocol.NodeInfo
+	startTime   time.Time
+	fileRoot    string
+	lifecycleMu sync.Mutex
+	roomMu      sync.Mutex
+	presence    presence
+	sendMu      sync.Mutex
+	events      *hub
+	// sched guards the per-agent inboxes and per-room run state.
+	sched     sync.Mutex
+	runSaveMu sync.Mutex
+	queues    map[string]*memberQueue
+	roomRuns  map[string]*roomRun
+	// sessionDocMu serializes read-modify-write of session documents.
+	sessionDocMu sync.Mutex
+	// turnLocks lets one native turn run per agent; local inbox turns and
+	// turns requested by connected hosts wait for each other.
+	turnLocks sync.Map
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
@@ -50,7 +56,7 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 			var run Run
 			if json.Unmarshal(b, &run) == nil && run.Status == "running" {
 				run.Status = "interrupted"
-				run.ActiveMember = ""
+				run.ActiveMember, run.ActiveMembers = "", nil
 				run.Error = "The host restarted while agents were working. Continue when you are ready."
 				store.PutDocument(context.Background(), "run", run.ID, run)
 			}
@@ -64,15 +70,20 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 			}
 		}
 	}
-	return &APIHandler{
+	h := &APIHandler{
 		supervisor: supervisor,
 		store:      store,
 		nodeInfo:   nodeInfo,
 		startTime:  time.Now(),
-		runs:       make(map[string]context.CancelCauseFunc), activeSessions: make(map[string]bool),
-		activeTurns: make(map[string]activeTurn),
-		presence:    presence{lastSeen: map[string]time.Time{}},
+		presence:   presence{lastSeen: map[string]time.Time{}},
+		events:     newHub(),
+		queues:     map[string]*memberQueue{},
+		roomRuns:   map[string]*roomRun{},
 	}
+	if store != nil {
+		h.ensureHandles(context.Background())
+	}
+	return h
 }
 
 func (h *APIHandler) Health(w http.ResponseWriter, r *http.Request) {

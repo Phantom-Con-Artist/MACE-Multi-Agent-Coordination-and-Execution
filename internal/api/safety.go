@@ -93,12 +93,7 @@ func (h *APIHandler) processOutput(ctx context.Context, id string) (stdout, stde
 // stopWork cancels conversations and their native processes. With localOnly,
 // turns that a connected host requested are left to that host to manage.
 func (h *APIHandler) stopWork(cause error, localOnly bool) (runs, processes int) {
-	h.runMu.Lock()
-	for _, cancel := range h.runs {
-		cancel(cause)
-		runs++
-	}
-	h.runMu.Unlock()
+	runs = h.stopAllRuns(cause)
 	list, _ := h.supervisor.ListAgents(context.Background())
 	var wg sync.WaitGroup
 	for _, p := range list {
@@ -155,25 +150,17 @@ func (h *APIHandler) pauseAll(w http.ResponseWriter, r *http.Request) {
 // continueConversation resumes an interrupted or paused conversation.
 func (h *APIHandler) continueConversation(w http.ResponseWriter, r *http.Request) {
 	id := routeParam(r, "room")
-	members := []string{id}
-	var group Room
-	if h.store.Document(r.Context(), "room", id, &group) == nil {
-		if group.Removed {
-			http.Error(w, "This group was removed.", http.StatusGone)
-			return
+	if _, _, e := h.conversation(r.Context(), id); e != nil {
+		code := 404
+		if e == errRemoved {
+			code = http.StatusGone
 		}
-		members = group.Members
-	} else if !h.knownMember(r.Context(), id) {
-		http.Error(w, "Conversation not found.", 404)
+		http.Error(w, e.Error(), code)
 		return
 	}
-	m := Message{ID: newID(), Room: id, Sender: "mace", Kind: "system", Text: "Continued after the interruption. Agents pick up where they stopped and check what was already done before repeating anything.", At: time.Now().UTC(), Delivery: map[string]string{}}
-	if e := h.beginConversation(id, members, m); e != nil {
+	m, e := h.wakeAll(r.Context(), id, "Continued after the interruption. Agents pick up where they stopped and check what was already done before repeating anything.")
+	if e != nil {
 		http.Error(w, e.Error(), 409)
-		return
-	}
-	if e := h.store.PutDocument(r.Context(), "message:"+id, m.ID, m); e != nil {
-		http.Error(w, e.Error(), 500)
 		return
 	}
 	h.audit("you", "CONVERSATION_CONTINUED", id, nil)

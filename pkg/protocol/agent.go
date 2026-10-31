@@ -45,6 +45,9 @@ type AgentLaunchRequest struct {
 	// Reserved means the caller already holds a slot from AcquireSlot. The
 	// supervisor takes ownership of that slot whether or not the launch succeeds.
 	Reserved bool `json:"-"`
+	// OnOutput receives every output line synchronously, in order, before it is
+	// stored. Long lines arrive in chunks with partial set. It must not block.
+	OnOutput func(stream EventType, text string, partial bool) `json:"-"`
 }
 
 // Validate checks whether the launch request has valid parameters.
