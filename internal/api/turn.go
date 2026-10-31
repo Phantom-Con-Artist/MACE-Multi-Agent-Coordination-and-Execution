@@ -24,6 +24,8 @@ type turnResult struct {
 	// Reset means a resume was requested but the CLI started a new session,
 	// so the agent lost its native memory of earlier turns.
 	Reset bool `json:"reset,omitempty"`
+	// Usage is what the turn cost, when the CLI reports it.
+	Usage *Usage `json:"usage,omitempty"`
 }
 
 // lockTurn waits until no other turn of this agent is running. Inbox turns and
@@ -98,6 +100,9 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 	prompt := p.Full
 	if resume && p.Delta != "" {
 		prompt = p.Delta
+		if slim := h.slimHeader(ctx, s, p); slim != "" && p.Body != "" {
+			prompt = slim + p.Body
+		}
 	}
 	if !resume {
 		prompt = agentInstructions(s) + "\n" + prompt
@@ -223,9 +228,20 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 		dir := s.Directory
 		h.updateSession(context.Background(), id, func(s *Session) { s.NativeSession, s.NativeDir = reported, dir })
 		h.store.PutDocument(context.Background(), "briefing", "aware|"+id, briefing{Hash: awareHash, Native: reported})
+		// The session now holds this header, unless it was replaced by a
+		// fresh one that saw only part of it.
+		if p.Brief != "" && p.Room != "" && (!resume || reported == nativeID) {
+			h.store.PutDocument(context.Background(), "briefing", id+"|"+p.Room, briefing{Hash: p.Brief, Native: reported, Team: p.Team})
+		}
 	}
-	h.audit(id, "TURN_COMPLETED", proc.ID, map[string]any{"session": id, "steps": len(state.Steps)})
-	return turnResult{Text: reply, Activity: state.Steps, Reset: resume && reported != nativeID}, nil
+	res := turnResult{Text: reply, Activity: state.Steps, Reset: resume && reported != nativeID}
+	details := map[string]any{"session": id, "steps": len(state.Steps)}
+	if !state.Usage.empty() {
+		res.Usage = &state.Usage
+		details["usage"] = state.Usage
+	}
+	h.audit(id, "TURN_COMPLETED", proc.ID, details)
+	return res, nil
 }
 
 func truncate(s string, n int) string {

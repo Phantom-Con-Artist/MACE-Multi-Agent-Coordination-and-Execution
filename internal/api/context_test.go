@@ -67,12 +67,22 @@ func TestResumedTurnsSkipTheUnchangedHeader(t *testing.T) {
 	if !strings.Contains(second, "second task") || !strings.Contains(second, "unchanged since your last turn") {
 		t.Fatalf("a resumed turn still carries the request and says the rest is unchanged:\n%s", second)
 	}
-	// A new role changes the header, so it is sent again in full.
+	// A new role sends only that coworker's changed line.
 	call(t, tm.s, "POST", "/api/v1/rooms/"+room.ID+"/members/"+tm.agents["bo"].ID+"/role", map[string]string{"role": "Tester"}, nil)
 	tm.say(t, room.ID, "@ari third task")
 	settled(t, tm.s, room.ID)
-	if third := turns()[2]; !strings.Contains(third, "HOW THIS TEAM WORKS") || !strings.Contains(third, "Tester") {
-		t.Fatalf("a changed team should be sent again:\n%s", third)
+	third := turns()[2]
+	if strings.Contains(third, "HOW THIS TEAM WORKS") || !strings.Contains(third, "TEAM CHANGES") || !strings.Contains(third, "Tester") {
+		t.Fatalf("a changed role should arrive as one team line:\n%s", third)
+	}
+	if strings.Count(third, "\n- ") != 1 {
+		t.Fatalf("only the changed coworker's line should be sent:\n%s", third)
+	}
+	// The next turn is back to the short form.
+	tm.say(t, room.ID, "@ari fourth task")
+	settled(t, tm.s, room.ID)
+	if fourth := turns()[3]; strings.Contains(fourth, "TEAM CHANGES") || !strings.Contains(fourth, "unchanged since your last turn") {
+		t.Fatalf("the change was delivered once:\n%s", fourth)
 	}
 }
 

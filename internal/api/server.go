@@ -133,6 +133,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/catalog", handler.catalog)
+		r.Get("/usage", handler.usage)
 		r.Get("/ctx/{room}/{view}", handler.contextFetch)
 		r.Get("/node/identity", handler.nodeIdentity)
 		r.Get("/node/ping", handler.ping)

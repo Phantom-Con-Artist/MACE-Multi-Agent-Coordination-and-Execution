@@ -139,6 +139,14 @@ Two loop guards sit on replies: a room pauses when agents repeat each other thre
 
 The daemon tells systemd it is ready and pings its watchdog every 30 s while `/health` answers through its own listener and the database responds (`internal/sdnotify`). A daemon that is alive but stuck stops pinging and is restarted after 60 s.
 
+## Briefings, review, and spending
+
+Each turn's delta travels in parts (the lines that change every turn, a hash of the stable rules, the team lines, and the new messages). The machine running the agent compares them with what that agent's session last received and sends only the changing lines, those plus the changed team lines, or the full header when the session is new or someone left.
+
+In a team, the lead's [done] is handed to a reviewer: the coworker whose role names design, review, QA, quality, or testing, else the first other available coworker. Only the reviewer's [approve] completes the run; their notes go to the lead. After three rounds since the owner last wrote, the lead's [done] stands.
+
+Every turn's token use, as the CLI reports it, comes back with the turn's result. The hub records it per agent (today and in total), per run, and in the audit log with the machine's name. Muse also reports the account's weekly allowance, which is kept with it.
+
 ## Trust through Tailscale
 
 The owner's machines and phones are recognised by their Tailscale account, so no codes are needed (`internal/api/tailnet.go`). Each MACE reads `tailscale status --json` (cached 10 s) for its own user and login and its peers' users, tags, and addresses. Only untagged devices of the same user count.

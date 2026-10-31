@@ -90,6 +90,10 @@ type roomRun struct {
 	lastErr  string
 	recent   []string
 	strikes  int
+	// review is the coworker whose [approve] finishes a team's task; reviews
+	// counts rounds since the owner last wrote.
+	review  string
+	reviews int
 }
 
 // queueFor returns the member's inbox. The caller holds h.sched.
@@ -491,6 +495,7 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 		rr.run = Run{ID: room, Status: "running", Policy: p}
 		rr.gen++
 		rr.inflight, rr.limitHit, rr.closed, rr.lastErr, rr.recent, rr.strikes = 0, false, false, "", nil, 0
+		rr.review, rr.reviews = "", 0
 		// In a group the owner's word wins: the agents it addresses drop what
 		// they were doing here, and nothing they started earlier is posted.
 		if group != nil && m.Sender == "you" {
@@ -636,8 +641,8 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		h.systemNote(req.Room, name+" could not reply: "+limited(err.Error(), 600))
 		return
 	}
+	h.recordUsage(ctx, req.Room, req.Member, res.Usage)
 	h.setCursor(ctx, req.Member, req.Room, lastSeq)
-	h.recordBriefing(ctx, req.Member, req.Room, prompts.Brief)
 	h.refreshAfterTurn(ctx, req.Member)
 	if res.Reset {
 		h.systemNote(req.Room, name+" started a fresh native session, so it may not remember earlier work in detail.")
@@ -651,8 +656,9 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		text = strings.TrimSpace(strings.ReplaceAll(text, "[GOAL_COMPLETE]", ""))
 	}
 	text = strings.TrimSpace(strings.ReplaceAll(text, "[PASS]", ""))
-	// Coworkers already have this; the owner asking again still gets it.
-	if req.Hop > 0 && !sharePattern.MatchString(text) && h.repeats(ctx, req.Room, req.Member, text) {
+	// Coworkers already have this; the owner asking again still gets it, and
+	// [done] or [approve] after a fix is a new signal however it is worded.
+	if req.Hop > 0 && !sharePattern.MatchString(text) && !signalPattern.MatchString(text) && h.repeats(ctx, req.Room, req.Member, text) {
 		return
 	}
 	flair, role, text := h.takeTags(ctx, req.Room, group, req.Member, text)
@@ -703,9 +709,13 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		h.halt(req.Room, errGoalComplete, "goal_reported_complete")
 		return
 	}
-	if flair == "done" && (p.Mode == "continuous" || p.Mode == "team" && req.Member == p.Lead) {
+	if flair == "done" && p.Mode == "team" && req.Member == p.Lead && h.askReview(ctx, req.Room, group, p, members) {
+		return // the reviewer's [approve] finishes it
+	}
+	if flair == "done" && (p.Mode == "continuous" || p.Mode == "team" && req.Member == p.Lead) ||
+		flair == "approve" && p.Mode == "team" && h.approved(req.Room, req.Member) {
 		// "Until done" ends when an agent reports the request is done; a team
-		// ends only when its lead does.
+		// ends when its lead's result passes review.
 		h.halt(req.Room, errGoalComplete, "completed")
 		return
 	}

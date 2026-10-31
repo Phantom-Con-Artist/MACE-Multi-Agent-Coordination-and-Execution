@@ -192,7 +192,7 @@ func (h *APIHandler) peerTurn(ctx context.Context, peer, id string, prompts turn
 	}
 	var out turnResult
 	// prompt keeps hosts on the previous protocol working; they ignore full and delta.
-	body := map[string]string{"prompt": prompts.Full, "full": prompts.Full, "delta": prompts.Delta}
+	body := map[string]any{"prompt": prompts.Full, "full": prompts.Full, "delta": prompts.Delta, "room": prompts.Room, "volatile": prompts.Volatile, "brief": prompts.Brief, "team": prompts.Team, "body": prompts.Body}
 	if h.resumable(ctx, p) {
 		return h.peerTurnResumable(ctx, p, id, body)
 	}

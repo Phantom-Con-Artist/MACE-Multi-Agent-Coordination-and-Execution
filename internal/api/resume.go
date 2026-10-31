@@ -110,9 +110,10 @@ func backoff(attempt int) time.Duration {
 // peerTurnResumable asks a joined machine for a turn and keeps asking with
 // the same key until it answers, the turn limit passes, or ctx ends. When
 // ctx ends the machine is told to stop the turn.
-func (h *APIHandler) peerTurnResumable(ctx context.Context, p Peer, id string, body map[string]string) (turnResult, error) {
+func (h *APIHandler) peerTurnResumable(ctx context.Context, p Peer, id string, body map[string]any) (turnResult, error) {
 	path := "/sessions/" + url.PathEscape(id) + "/turn"
-	body["key"] = newID()
+	key := newID()
+	body["key"] = key
 	deadline := time.Now().Add(turnLimit())
 	for attempt := 0; ; attempt++ {
 		var out turnResult
@@ -131,7 +132,7 @@ func (h *APIHandler) peerTurnResumable(ctx context.Context, p Peer, id string, b
 			// Best effort: the machine may be unreachable, and its turn then
 			// ends at its own limit.
 			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			h.peerRequest(stopCtx, p, path, map[string]string{"key": body["key"], "cancel": "1"}, &struct{}{})
+			h.peerRequest(stopCtx, p, path, map[string]string{"key": key, "cancel": "1"}, &struct{}{})
 			cancel()
 			return out, ctx.Err()
 		}

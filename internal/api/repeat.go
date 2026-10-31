@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -12,6 +13,9 @@ import (
 // a copy of one of the agent's own recent messages is treated as [PASS].
 // Similarity is the Jaccard index of word shingles (pairs of words), the
 // standard near-duplicate test from Broder's work on web pages.
+
+// signalPattern matches replies that report a state, not news.
+var signalPattern = regexp.MustCompile(`(?i)^\s*\[(done|approve)\]`)
 
 const (
 	repeatSimilarity = 0.7

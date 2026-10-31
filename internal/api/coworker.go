@@ -147,20 +147,38 @@ func (h *APIHandler) memberName(ctx context.Context, id string) string {
 type turnPrompt struct {
 	Full  string `json:"full"`
 	Delta string `json:"delta,omitempty"`
-	// Room is the conversation the turn is for; Brief is the hash of the
-	// header's stable part, recorded once the turn succeeds.
-	Room  string `json:"room,omitempty"`
-	Brief string `json:"-"`
+	// Room is the conversation the turn is for.
+	Room string `json:"room,omitempty"`
+	// The delta in parts, so the machine running the agent can leave out
+	// the header its session already holds: the lines that change every
+	// turn, a hash of the stable rest, the team lines, and the new messages.
+	// Hosts on protocol 2 ignore these and send Delta.
+	Volatile string   `json:"volatile,omitempty"`
+	Brief    string   `json:"brief,omitempty"`
+	Team     []string `json:"team,omitempty"`
+	Body     string   `json:"body,omitempty"`
 }
 
 // volatileHeader marks header lines that change from turn to turn. They are
 // always sent; the rest is sent again only when it changes.
 var volatileHeader = []string{"THIS TURN IS FOR", "You are speaking as", "OWNER'S LATEST REQUEST:", "Your last message here was", "CODE MAP:"}
 
-// splitHeader separates a header into its volatile lines and a hash of the rest.
-func splitHeader(header string) (volatile, brief string) {
+// splitHeader separates a header into its volatile lines, a hash of the
+// stable rest, and the team lines, which change on their own when someone
+// claims a role.
+func splitHeader(header string) (volatile, brief string, team []string) {
 	var keep, rest strings.Builder
+	inTeam := false
 	for _, line := range strings.SplitAfter(header, "\n") {
+		switch {
+		case line == "TEAM:\n":
+			inTeam = true
+		case inTeam && strings.HasPrefix(line, "- "):
+			team = append(team, line)
+			continue
+		default:
+			inTeam = false
+		}
 		moving := false
 		for _, prefix := range volatileHeader {
 			moving = moving || strings.HasPrefix(line, prefix)
@@ -172,32 +190,41 @@ func splitHeader(header string) (volatile, brief string) {
 		}
 	}
 	sum := sha256.Sum256([]byte(rest.String()))
-	return keep.String(), hex.EncodeToString(sum[:12])
+	return keep.String(), hex.EncodeToString(sum[:12]), team
 }
 
 type briefing struct {
-	Hash   string `json:"hash"`
-	Native string `json:"native"`
+	Hash   string   `json:"hash"`
+	Native string   `json:"native"`
+	Team   []string `json:"team,omitempty"`
 }
 
-// briefed reports whether an agent's current native session already holds
-// this exact header for this conversation.
-func (h *APIHandler) briefed(ctx context.Context, member, room, hash string) bool {
-	var s Session
+// slimHeader returns the header to send a resumed agent: only the volatile
+// lines when its session holds the rest, those plus the changed team lines
+// when only the team changed, or "" when it needs the whole header again.
+func (h *APIHandler) slimHeader(ctx context.Context, s Session, p turnPrompt) string {
 	var b briefing
-	if strings.Contains(member, "::") || h.store.Document(ctx, "session", member, &s) != nil || s.NativeSession == "" {
-		return false
+	if p.Brief == "" || h.store.Document(ctx, "briefing", s.ID+"|"+p.Room, &b) != nil || b.Hash != p.Brief || b.Native != s.NativeSession {
+		return ""
 	}
-	return h.store.Document(ctx, "briefing", member+"|"+room, &b) == nil && b.Hash == hash && b.Native == s.NativeSession
-}
-
-// recordBriefing notes the header a local agent's native session now holds.
-func (h *APIHandler) recordBriefing(ctx context.Context, member, room, hash string) {
-	var s Session
-	if hash == "" || strings.Contains(member, "::") || h.store.Document(ctx, "session", member, &s) != nil || s.NativeSession == "" {
-		return
+	held := map[string]bool{}
+	for _, line := range b.Team {
+		held[line] = true
 	}
-	h.store.PutDocument(ctx, "briefing", member+"|"+room, briefing{Hash: hash, Native: s.NativeSession})
+	var changed strings.Builder
+	for _, line := range p.Team {
+		if !held[line] {
+			changed.WriteString(line)
+		}
+	}
+	switch {
+	case len(p.Team) < len(b.Team):
+		return "" // someone left; the whole team is clearer
+	case changed.Len() == 0:
+		return p.Volatile + "The team, roles, and rules here are unchanged since your last turn.\n"
+	default:
+		return p.Volatile + "TEAM CHANGES since your last turn (everything else here is unchanged):\n" + changed.String()
+	}
 }
 
 // conversationHeader describes the room and the agent's place in it.
@@ -262,9 +289,9 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 	}
 	if p.Mode == "team" {
 		if member == p.Lead {
-			header.WriteString("YOU ARE THE LEAD of this team. The owner's messages come to you unless they @mention someone else. Work in three steps. 1) Brief: before assigning anything, confirm with the owner in one short message the goal, scope, and what done means; skip this when the request already makes them clear. 2) Divide: post a [plan] that splits the work into parts, each with one owner chosen by what that coworker's CLI, model, and machine are best at, plus the shared contracts (files, interfaces) the parts must agree on. Give each part to exactly one coworker, so nothing is built twice. Coworkers on other machines work in their own folders and hand over files or whole folders with [share: path], which arrives here as a copy. For anything people will look at, make one coworker own its design quality. Notes about sources belong in chat, not in the product. 3) Conquer: let them work in parallel, then integrate and verify. Throughout, assign and change roles, direct coworkers with @handle, answer their questions, check their results, and keep the owner posted in a line or two. Keep your own turns short and delegate heavy work. To stop a coworker and give new direction, start your message with [redirect] and @mention them. When every part works together, start your message with [done] and one line of proof; only your [done] finishes the task.\n")
+			header.WriteString("YOU ARE THE LEAD of this team. The owner's messages come to you unless they @mention someone else. Work in three steps. 1) Brief: before assigning anything, confirm with the owner in one short message the goal, scope, and what done means; skip this when the request already makes them clear. 2) Divide: post a [plan] that splits the work into parts, each with one owner chosen by what that coworker's CLI, model, and machine are best at, plus the shared contracts (files, interfaces) the parts must agree on. Give each part to exactly one coworker, so nothing is built twice. Coworkers on other machines work in their own folders and hand over files or whole folders with [share: path], which arrives here as a copy. For anything people will look at, make one coworker own its design quality. Notes about sources belong in chat, not in the product. 3) Conquer: let them work in parallel, then integrate and verify. Throughout, assign and change roles, direct coworkers with @handle, answer their questions, check their results, and keep the owner posted in a line or two. Keep your own turns short and delegate heavy work. To stop a coworker and give new direction, start your message with [redirect] and @mention them. When every part works together, start your message with [done] and one line of proof. Mace then hands the result to its design owner, and only their [approve] finishes the task, so never tell the owner it is finished or looks good before that.\n")
 		} else {
-			fmt.Fprintf(&header, "@%s is the lead of this team (also reachable as @lead). Do not start on the owner's request until the lead assigns you a part; then build exactly that part against the lead's plan. Send questions, results, and blockers to @lead. Do not post that you are ready, waiting, or holding: when you have nothing new, reply [PASS]. If the owner @mentions you, answer the owner directly; the lead sees it too. [done] marks your own part finished, not the whole task.\n", handles[p.Lead])
+			fmt.Fprintf(&header, "@%s is the lead of this team (also reachable as @lead). Do not start on the owner's request until the lead assigns you a part; then build exactly that part against the lead's plan. Send questions, results, and blockers to @lead. Do not post that you are ready, waiting, or holding: when you have nothing new, reply [PASS]. If the owner @mentions you, answer the owner directly; the lead sees it too. [done] marks your own part finished, not the whole task. When Mace asks you to review the result, judge it as the owner would: open or run it, and reply [approve] only if you would ship it.\n", handles[p.Lead])
 		}
 	}
 	switch p.Mode {
@@ -329,7 +356,7 @@ func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage, rea
 // turn is always fresh.
 func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members []string, group *Room, p Policy) (turnPrompt, int64, bool) {
 	header := h.conversationHeader(ctx, req.Room, req.Member, members, group, p) + h.codeMapLine(ctx, req.Member) + h.contextLine(req.Member)
-	volatile, brief := splitHeader(header)
+	volatile, brief, team := splitHeader(header)
 	recent, _, _ := h.store.Messages(ctx, req.Room, 0, 0, 40)
 	raw := func(rows []storage.StoredMessage) []json.RawMessage {
 		out := []json.RawMessage{}
@@ -345,18 +372,14 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	full := header + "\nSHARED CONVERSATION (oldest to newest):\n" + truncate(h.transcript(ctx, raw(recent), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	since := h.cursor(ctx, req.Member, req.Room)
 	if since == 0 {
-		return turnPrompt{Full: full, Room: req.Room, Brief: brief}, last, true
-	}
-	deltaHeader := header
-	if h.briefed(ctx, req.Member, req.Room, brief) {
-		deltaHeader = volatile + "The team, roles, and rules here are unchanged since your last turn.\n"
+		return turnPrompt{Full: full, Room: req.Room, Brief: brief, Team: team}, last, true
 	}
 	newer, more, _ := h.store.Messages(ctx, req.Room, 0, since, 40)
 	note := ""
 	if more {
 		note = "(More messages arrived than fit here; the newest are below. Ask if you need the rest.)\n"
 	}
-	delta := deltaHeader + "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
+	body := "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	fresh := false
 	for _, row := range newer {
 		var m Message
@@ -367,7 +390,7 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	if len(newer) > 0 {
 		last = max(last, newer[len(newer)-1].Seq)
 	}
-	return turnPrompt{Full: full, Delta: delta, Room: req.Room, Brief: brief}, last, fresh
+	return turnPrompt{Full: full, Delta: header + body, Room: req.Room, Volatile: volatile, Brief: brief, Team: team, Body: body}, last, fresh
 }
 
 func (h *APIHandler) available(ctx context.Context, id string) bool {

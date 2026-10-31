@@ -25,6 +25,7 @@ if [ -e count ]; then n=$(( $(cat count) + 1 )); echo $n > count; reply="$reply 
 printf '%s\n' "$@" >> prompts.log; echo ---- >> prompts.log
 env | grep '^MACE_' > env.log
 echo '{"event":"init","conversation_id":"conv-'$me'"}'
+cat usage 2>/dev/null
 echo '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"Path":"/w/plan.md"}}}}'
 printf '{"event":"result","result":{"conversation_id":"conv-%s","status":"SUCCESS","response":"%s"}}\n' "$me" "$reply"
 echo "end $me" >> "$TIMELINE"

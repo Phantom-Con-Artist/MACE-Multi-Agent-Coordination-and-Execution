@@ -36,6 +36,9 @@ type turnState struct {
 	Steps     []Activity
 	index     map[string]int
 	changed   bool
+	// Usage is what the turn cost, as the CLI reported it.
+	Usage   Usage
+	counted map[string]bool
 }
 
 // pathInTicks matches a backticked absolute path, which CLIs often print in
@@ -259,6 +262,9 @@ func parseAgy(line string, t *turnState) {
 			t.step("agy-"+id, kind, title, detail, state)
 		case "agent_response":
 			t.Deltas.WriteString(str(u, "text_delta"))
+			if u["state"] == "DONE" {
+				t.agyUsage(id, obj(u["usage"]))
+			}
 		}
 	case "result":
 		r := obj(ev["result"])
@@ -283,6 +289,8 @@ func parseMuse(line string, t *turnState) {
 	p := obj(ev["payload"])
 	typ := str(ev, "payload_type")
 	switch {
+	case typ == "run.usage":
+		t.museUsage(p)
 	case typ == "run.output.delta":
 		// Muse runs the model several times in a turn and joins the texts
 		// with nothing between them; keep them apart as paragraphs.
@@ -365,6 +373,9 @@ func parseClaude(line string, t *turnState) {
 			t.Err = "Claude Code: " + limited(str(ev, "result", "error"), 500)
 		}
 		t.Final, t.HaveFinal = str(ev, "result"), true
+		if u := obj(ev["usage"]); u != nil {
+			t.Usage.add(Usage{Input: count(u, "input_tokens") + count(u, "cache_creation_input_tokens") + count(u, "cache_read_input_tokens"), Cached: count(u, "cache_read_input_tokens"), Output: count(u, "output_tokens"), Calls: int(count(ev, "num_turns"))})
+		}
 	}
 }
 
@@ -406,6 +417,10 @@ func parseCodex(line string, t *turnState) {
 		case "mcp_tool_call":
 			kind, title, detail := describeTool(str(item, "tool"), obj(item["arguments"]))
 			t.step(id, kind, title, detail, state)
+		}
+	case "turn.completed":
+		if u := obj(ev["usage"]); u != nil {
+			t.Usage.add(Usage{Input: count(u, "input_tokens"), Cached: count(u, "cached_input_tokens"), Output: count(u, "output_tokens"), Reasoning: count(u, "reasoning_output_tokens"), Calls: 1})
 		}
 	case "turn.failed", "error":
 		t.Err = "Codex: " + limited(str(obj(ev["error"]), "message")+str(ev, "message"), 500)

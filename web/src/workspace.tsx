@@ -114,7 +114,15 @@ type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
 type Policy = { mode: string; goal: string; limit: number; tone?: string; lead?: string };
-type Run = { id: string; status: string; replies: number; error?: string; active_member?:string; active_members?: string[] };
+type Usage = { input: number; output: number; cached?: number; turns?: number; weekly_used?: number };
+type Run = { id: string; status: string; replies: number; error?: string; active_member?:string; active_members?: string[]; usage?: Usage };
+type Spend = { member: string; today: Usage; total: Usage };
+
+/** Tokens in and out, in a few characters: 12.4k, 1.2M. */
+const tokens = (u?: Usage) => {
+  const n = u ? u.input + u.output : 0;
+  return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+};
 // Messages arrive from the stream and from paged loads; keep one copy of each,
 // in conversation order.
 const mergeMessages = (list: Msg[], incoming: Msg[]) => {
@@ -261,6 +269,7 @@ export default function Workspace() {
     [pushOn, setPushOn] = useState(false),
     [remote, setRemote] = useState<Agent[]>([]),
     [runs, setRuns] = useState<Run[]>([]),
+    [spend, setSpend] = useState<Record<string, Spend>>({}),
     [node, setNode] = useState<Record<string, unknown>>({});
   const [selected, select] = useState(""),
     [messages, setMessages] = useState<Msg[]>([]),
@@ -450,7 +459,7 @@ export default function Workspace() {
         setOnline(true);
         return;
       }
-      const [a, p, r, c, n, h, ru] = await Promise.all([
+      const [a, p, r, c, n, h, ru, sp] = await Promise.all([
         api<Agent[]>("/v1/sessions"),
         api<Agent[]>("/v1/agents/"),
         api<Room[]>("/v1/rooms"),
@@ -458,6 +467,7 @@ export default function Workspace() {
         api<Record<string, unknown>>("/v1/node"),
         api<Peer[]>("/v1/peers"),
         api<Run[]>("/v1/runs"),
+        api<Spend[]>("/v1/usage").catch(() => [] as Spend[]),
       ]);
       setAgents(a);
       setProcesses(p);
@@ -466,6 +476,7 @@ export default function Workspace() {
       setNode(n);
       setPeers(h);
       setRuns(ru);
+      setSpend(Object.fromEntries(sp.map((x) => [x.member, x])));
       setConnected(true);
       setOnline(true);
     } catch {
@@ -974,6 +985,7 @@ export default function Workspace() {
           <strong>{a.name}</strong>
           <small title={a.working_dir}>
             @{a.handle} · {folderName(a.working_dir)}
+            {spend[a.id]?.today.input ? " · " + tokens(spend[a.id].today) + " tokens today" : ""}
           </small>
         </span>
         <em className={"status-chip " + a.status}>{statusLabel(a.status)}</em>
@@ -2085,6 +2097,7 @@ export default function Workspace() {
                         <small>
                           {statusLabel(r.status)} · {r.replies}{" "}
                           {r.replies === 1 ? "reply" : "replies"}
+                          {r.usage && r.usage.input + r.usage.output > 0 ? " · " + tokens(r.usage) + " tokens" : ""}
                         </small>
                       </button>
                     ))}

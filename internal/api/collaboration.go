@@ -30,6 +30,8 @@ type Run struct {
 	ActiveMember string    `json:"active_member,omitempty"`
 	// ActiveMembers lists every agent working in this conversation right now.
 	ActiveMembers []string `json:"active_members,omitempty"`
+	// Usage is what this run cost so far, on every machine.
+	Usage Usage `json:"usage"`
 }
 type FileLink struct {
 	Peer        string `json:"peer"`
