@@ -526,6 +526,13 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun nodes(): List<Node> = hub().nodes()
 
+    /**
+     * A page of the hub's web app. Monitoring, file browsing, and opening
+     * desktop apps stay on the web; the owner's own devices sign in there
+     * through Tailscale.
+     */
+    fun webUrl(page: String): String? = session.origin?.let { "$it/#$page" }
+
     suspend fun peers(): List<io.github.phantomconartist.mace.data.Peer> = hub().peers()
 
     /** Files shared in a conversation, newest first, for its info page. */

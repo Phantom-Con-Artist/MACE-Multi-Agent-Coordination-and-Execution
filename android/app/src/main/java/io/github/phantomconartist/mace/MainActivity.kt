@@ -40,7 +40,6 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.phantomconartist.mace.ui.ChatActions
 import io.github.phantomconartist.mace.ui.ChatScreen
-import io.github.phantomconartist.mace.ui.FilePicker
 import io.github.phantomconartist.mace.ui.HomeActions
 import io.github.phantomconartist.mace.ui.HomeScreen
 import io.github.phantomconartist.mace.ui.InfoActions
@@ -104,7 +103,8 @@ class MainActivity : FragmentActivity() {
         var page by rememberSaveable { mutableStateOf("home") }
         var info by rememberSaveable { mutableStateOf<String?>(null) }
         var mode by remember { mutableStateOf(false) }
-        var browse by remember { mutableStateOf<String?>(null) }
+        val bar = androidx.compose.material3.MaterialTheme.colorScheme.surface
+        val webFiles: () -> Unit = { model.webUrl("files")?.let { url -> io.github.phantomconartist.mace.ui.openWeb(this@MainActivity, url, android.graphics.Color.argb(255, (bar.red * 255).toInt(), (bar.green * 255).toInt(), (bar.blue * 255).toInt())) } }
         var photoFor by rememberSaveable { mutableStateOf<Pair<String, Boolean>?>(null) }
         val share by shared
         val snack = remember { SnackbarHostState() }
@@ -149,7 +149,7 @@ class MainActivity : FragmentActivity() {
                         InfoPage(id, model, InfoActions(
                             onBack = { info = null },
                             onMessage = { target -> info = null; page = "home"; if (chat?.id != target) model.open(target) },
-                            onFiles = { browse = it },
+                            onFiles = { webFiles() },
                             onPickPhoto = { target, group -> photoFor = target to group; photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                             onOpenFile = open,
                         ))
@@ -180,6 +180,7 @@ class MainActivity : FragmentActivity() {
                                 onOpenFile = open,
                                 onObserve = model::setObserve,
                                 onLink = model::showLink,
+                                onBrowse = webFiles,
                                 files = model::files,
                                 models = model::models,
                             ),
@@ -216,7 +217,6 @@ class MainActivity : FragmentActivity() {
             LaunchedEffect(c.id) { policy = runCatching { model.policy(c.id) }.getOrDefault(io.github.phantomconartist.mace.data.Policy(mode = if (c.group) "team" else "reply")) }
             policy?.let { p -> PolicySheet(c.id, rooms[c.id], agents, p, onSave = { model.savePolicy(c.id, it); mode = false }, onDismiss = { mode = false }) }
         }
-        browse?.let { start -> FilePicker(start, model::files, onPick = { browse = null; open(it) }, onDismiss = { browse = null }) }
     }
 
     private fun depth(view: String) = when (view) {

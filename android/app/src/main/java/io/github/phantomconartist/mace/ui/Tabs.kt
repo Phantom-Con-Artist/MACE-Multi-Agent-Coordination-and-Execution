@@ -18,7 +18,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MonitorHeart
+import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Link
@@ -81,6 +87,14 @@ fun MaceSwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
     Switch(checked, onChange, colors = SwitchDefaults.colors(checkedTrackColor = mace.signal, checkedThumbColor = mace.onSignal))
 }
 
+/** Marks a row that opens in the web app. */
+@Composable
+fun WebMark() {
+    Icon(Icons.AutoMirrored.Rounded.OpenInNew, "Opens on the web", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+}
+
+private fun androidx.compose.ui.graphics.Color.toArgbInt() = android.graphics.Color.argb((alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())
+
 /** An agent row for lists: avatar with photo, name, and where it runs. */
 @Composable
 fun AgentRow(a: Member, media: MediaLoader, trailing: @Composable (() -> Unit)? = null, onClick: () -> Unit) {
@@ -119,6 +133,9 @@ fun AgentsTab(agents: List<Member>, model: AppModel, actions: HomeActions) {
 
 @Composable
 fun MachinesTab(model: AppModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val bar = MaterialTheme.colorScheme.surface.toArgbInt()
+    fun web(page: String) { model.webUrl(page)?.let { openWeb(context, it, bar) } }
     var nodes by remember { mutableStateOf<List<Node>?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { runCatching { model.nodes() }.onSuccess { nodes = it }.onFailure { problem = it.message } }
@@ -127,10 +144,15 @@ fun MachinesTab(model: AppModel) {
             Text("Every computer joined to your hub. Agents can run on any of them that is online.", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         }
+        item { SettingRow(Icons.Rounded.MonitorHeart, "Monitor", "CPU, memory, and load, on the web", onClick = { web("host") }) { WebMark() } }
+        item { SettingRow(Icons.Rounded.FolderOpen, "Files", "Browse and preview files, on the web", onClick = { web("files") }) { WebMark() } }
+        item { SettingRow(Icons.Rounded.Apps, "Apps", "Open desktop apps on a machine, on the web", onClick = { web("apps") }) { WebMark() } }
+        item { SettingRow(Icons.Rounded.History, "Activity", "Everything agents and you did, on the web", onClick = { web("activity") }) { WebMark() } }
+        item { SectionLabel("Machines") }
         problem?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(20.dp)) } }
         if (nodes == null && problem == null) item { Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp)) }
         items(nodes.orEmpty(), key = { it.id }) { n ->
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { web("hosts") }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(48.dp).clip(CircleShape).background(memberColor(n.id).copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.Computer, null, tint = memberColor(n.id))
                 }
@@ -139,14 +161,13 @@ fun MachinesTab(model: AppModel) {
                     Text(n.name.ifEmpty { n.id } + if (n.self) " (this hub)" else "", fontSize = 17.sp)
                     Text(
                         when {
+                            !n.self && !n.available -> if (n.lastSeen.isNotEmpty()) "Offline · last seen " + listTime(n.lastSeen) else "Offline"
                             n.problem.isNotEmpty() -> n.problem
-                            n.outdated -> "Needs an update"
-                            n.self || n.available -> "Online"
-                            n.lastSeen.isNotEmpty() -> "Offline · last seen " + listTime(n.lastSeen)
-                            else -> "Offline"
+                            n.outdated -> "Online · needs an update"
+                            else -> "Online"
                         },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (n.self || n.available) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (n.self || n.available) mace.online else mace.down,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -200,6 +221,11 @@ fun SettingsTab(hubName: String, model: AppModel, onSignOut: () -> Unit, onLinke
                 onClick = { keepWorking?.let { model.setKeepWorking(!it); keepWorking = !it } }) {
                 keepWorking?.let { k -> MaceSwitch(k) { model.setKeepWorking(it); keepWorking = it } }
             }
+        }
+        item {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val bar = MaterialTheme.colorScheme.surface.toArgbInt()
+            SettingRow(Icons.Rounded.OpenInBrowser, "MACE on the web", "The full desktop workspace", onClick = { model.webUrl("home")?.let { openWeb(context, it, bar) } }) { WebMark() }
         }
         item { SectionLabel("Devices") }
         item { SettingRow(Icons.Rounded.Devices, "Linked devices", "${devices.size} signed in. Link a browser or another phone.", onClick = onLinked) }

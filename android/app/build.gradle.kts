@@ -85,6 +85,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     // Biometric 1.1 pulls an old Fragment that rejects modern result request codes.
     implementation(libs.androidx.fragment)
+    implementation(libs.androidx.browser)
     implementation(libs.androidx.biometric)
     implementation(libs.zxing.core)
     implementation(libs.gms.code.scanner)

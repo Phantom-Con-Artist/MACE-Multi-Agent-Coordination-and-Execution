@@ -165,6 +165,8 @@ class ChatActions(
     val onOpenFile: (String) -> Unit,
     val onObserve: (Boolean) -> Unit,
     val onLink: () -> Unit,
+    /** Opens the hub's file browser on the web. */
+    val onBrowse: () -> Unit,
     val files: suspend (String) -> List<io.github.phantomconartist.mace.data.Entry>,
     val models: suspend (String) -> io.github.phantomconartist.mace.data.Models,
 )
@@ -213,7 +215,7 @@ fun ChatScreen(
         if (agent == null) return false
         val (name, arg) = parseCommand(text) ?: return false
         when (name) {
-            "files" -> picker = agent.folder
+            "files" -> actions.onBrowse()
             "new" -> confirmNew = true
             else -> actions.onCommand(name, arg)
         }
@@ -275,7 +277,7 @@ fun ChatScreen(
             },
             actions = {
                 if (state.group) IconButton(onClick = actions.onMode) { Icon(Icons.Rounded.Tune, "Conversation mode") }
-                else if (agent != null) IconButton(onClick = { picker = agent.folder }) { Icon(Icons.Rounded.Folder, "Browse files") }
+                else if (agent != null) IconButton(onClick = actions.onBrowse) { Icon(Icons.Rounded.Folder, "Browse files on the web") }
                 IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text(if (state.group) "Group info" else "Agent info") }, leadingIcon = { Icon(Icons.Rounded.Info, null) }, onClick = { menu = false; actions.onInfo() })
