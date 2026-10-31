@@ -32,6 +32,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 20. Trust through Tailscale: machines on the owner's Tailscale account find and join each other without codes (whichever starts first), phones opening the hub through tailscale serve sign in by the owner's login, and `mace-server setup` runs the hub as a boot service. Covered by tests with a simulated tailnet; not run on the real tailnet.
 
+21. Machines page for every machine (swipe or arrows; agents, files, apps per machine; start agents anywhere), hub forwarding of files, previews, apps, and launches; then, after a live four-agent landing page run (agy lead on the hub, Muse on the hub, agy and Muse on the PC; done in 7 minutes, page correct, commit c0942a5 in the playground): worker agents' shares pulled to the hub, folder sharing everywhere, briefs to @lead wake only the lead, quiet workers, one design owner, and machine protocol versions. Lessons from that run are in this commit's history.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.

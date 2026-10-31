@@ -109,7 +109,7 @@ type Msg = {
   role?: string;
   origin?: string;
 };
-type MachineNode = { id: string; name: string; self?: boolean; available: boolean };
+type MachineNode = { id: string; name: string; self?: boolean; available: boolean; outdated?: boolean };
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
@@ -1042,6 +1042,17 @@ export default function Workspace() {
         ))}
         {!entries.length && <p>This folder is empty.</p>}
       </div>
+      {purpose === "attach" && path !== "." && (
+        <button
+          className="secondary"
+          onClick={() => {
+            setAttachment(path.replace(/\/+$/, "") + "/");
+            setModal("");
+          }}
+        >
+          Attach this whole folder
+        </button>
+      )}
       {purpose === "folder" && (
         <button
           className="primary"
@@ -1543,7 +1554,15 @@ export default function Workspace() {
                               )}
                             </div>
                             {m.activity && <StepList steps={m.activity} />}
-                            {m.file && <Media path={m.file} />}
+                            {m.file && (
+                              <Media
+                                path={m.file}
+                                onFolder={(p) => {
+                                  nav("files");
+                                  void browse(p, "page");
+                                }}
+                              />
+                            )}
                             {m.sender !== "mace" && (
                               <small className="meta">
                                 {failed && <span className="meta-failed">Not delivered · </span>}
@@ -1873,6 +1892,7 @@ export default function Workspace() {
                       name: p.name,
                       self: false,
                       available: machines.find((n) => n.id === p.id)?.available ?? true,
+                      outdated: machines.find((n) => n.id === p.id)?.outdated,
                     })),
                   ]}
                   localHistory={machine.history}
@@ -3121,7 +3141,21 @@ function Logs({ id }: { id: string }) {
     </pre>
   );
 }
-function Media({ path, base = "/api/v1" }: { path: string; base?: string }) {
+function Media({ path, base = "/api/v1", onFolder }: { path: string; base?: string; onFolder?: (path: string) => void }) {
+  if (path.endsWith("/")) {
+    // A shared folder: open it in Files rather than previewing it.
+    const name = path.replace(/\/+$/, "").split("/").pop() || "/";
+    return (
+      <button className="media folder-share" onClick={() => onFolder?.(path.replace(/\/+$/, ""))}>
+        <Folder size={22} />
+        <span>
+          <strong>{name}/</strong>
+          <small>Shared folder · open in Files</small>
+        </span>
+        <ChevronRight size={17} />
+      </button>
+    );
+  }
   const url = base + "/files?path=" + encodeURIComponent(path),
     ext = path.split(".").pop()?.toLowerCase() || "";
   return (

@@ -125,6 +125,12 @@ Agents should spend their quota on the owner's work, not on re-reading MACE. Thr
 
 Still to do: workers on other machines reach the hub's context and code graph through their own node, which forwards signed requests to the hub (with hub step 4 routing); token usage reported by the CLIs, per agent and group, with a budget that pauses a run.
 
+## Sharing between machines
+
+`[share: path]` attaches a file or a whole folder, from any agent on any machine. An agent on a worker shares by path on its own machine: the hub asks the worker to offer it (`POST /transfers/offer`, signed), pulls the chunks, and attaches its copy, so everyone in the group can open it; agents on other workers receive their own copy before their next turn. Folders travel as one chunked tar package of plain files and folders (skipping `.git`, `node_modules`, `.venv`, `__pycache__`, `graphify-out`; at most 20,000 files and 2 GiB) and unpack only inside their destination, with nothing left behind on failure. A folder attachment's path ends in `/`; chats show it as a folder that opens in Files, and the owner can attach a whole folder from the file picker. Long pasted code blocks become files for agents on every machine.
+
+Machines report a protocol version (`nodeProtocol`, now 2) with every check. A machine on an older version shows as needing an update in the app and in `mace machines`, and a request it refuses for that reason says how to update it. A path a current machine does not offer is refused with 403, kept distinct from a bad signature (401).
+
 ## Trust through Tailscale
 
 The owner's machines and phones are recognised by their Tailscale account, so no codes are needed (`internal/api/tailnet.go`). Each MACE reads `tailscale status --json` (cached 10 s) for its own user and login and its peers' users, tags, and addresses. Only untagged devices of the same user count.

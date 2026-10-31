@@ -195,6 +195,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/transfers", handler.transfers)
 		r.Post("/transfers/receive", handler.receive)
 		r.Post("/transfers/fetch", handler.fetchTransfer)
+		r.Post("/transfers/offer", handler.offerTransfer)
 		r.Get("/blobs/{hash}", handler.blob)
 		r.Get("/push/key", handler.pushKey)
 		r.Post("/push/subscribe", handler.pushSubscribe)

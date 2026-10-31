@@ -17,6 +17,7 @@ type nodeView struct {
 	LastSeen  *time.Time `json:"last_seen"`
 	Problem   string     `json:"problem"`
 	Checking  bool       `json:"checking"`
+	Outdated  bool       `json:"outdated"`
 }
 
 // join prints an invite with --invite, or joins this machine to another one.
@@ -83,6 +84,9 @@ func (c settings) nodes() error {
 		}
 		if n.Problem != "" && !n.Self {
 			state += " (" + strings.ToLower(n.Problem) + ")"
+		}
+		if n.Outdated && !n.Self {
+			state += ", needs update"
 		}
 		if n.LastSeen != nil {
 			seen = n.LastSeen.Local().Format("15:04:05")

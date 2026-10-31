@@ -18,6 +18,7 @@ import (
 // attaches the file; a long pasted code block becomes a file automatically.
 // Tagged agents get the path in their next turn; everyone else only learns
 // that something was shared, so nobody reads files that are not for them.
+// Folders share the same way: [share: site/] attaches the whole folder.
 
 var (
 	sharePattern = regexp.MustCompile(`\[share:\s*([^\]\n]+)\]`)
@@ -50,27 +51,39 @@ func (h *APIHandler) sharesDir(room string) string {
 }
 
 // attachShares removes share tags and long pastes from a reply and returns
-// the files to attach, relative to the file root. Remote agents' paths name
-// files on their own host, so their tags are left as text.
+// the files and folders to attach, relative to the file root; a folder ends
+// in a slash. What an agent on another machine shares is pulled here first,
+// so everyone in the conversation can open it.
 func (h *APIHandler) attachShares(ctx context.Context, m *Message, s Session) []string {
 	files := []string{}
-	if strings.Contains(s.ID, "::") {
-		return files
-	}
+	remote := strings.Contains(s.ID, "::")
 	m.Text = sharePattern.ReplaceAllStringFunc(m.Text, func(tag string) string {
 		raw := strings.TrimSpace(sharePattern.FindStringSubmatch(tag)[1])
-		path := raw
-		if strings.HasPrefix(path, "~") {
-			home, _ := os.UserHomeDir()
-			path = filepath.Join(home, strings.TrimPrefix(path, "~"))
-		} else if !filepath.IsAbs(path) {
-			path = filepath.Join(s.Directory, path)
+		if len(files) >= maxSharesPerReply {
+			return "(could not share " + raw + ": too many shares in one message)"
 		}
-		path = filepath.Clean(path)
-		info, err := os.Stat(path)
-		rel, inside := h.rootRelative(path)
-		if err != nil || !info.Mode().IsRegular() || !inside || len(files) >= maxSharesPerReply {
-			return "(could not share " + raw + ")"
+		var rel string
+		if remote {
+			pulled, err := h.pullShare(ctx, m.Room, s.ID, raw)
+			if err != nil {
+				return "(could not share " + raw + ": " + limited(err.Error(), 160) + ")"
+			}
+			rel = pulled
+		} else {
+			r, inside := h.resolveShare(raw, s.Directory)
+			if !inside {
+				return "(could not share " + raw + ": outside the shared file root)"
+			}
+			rel = r
+		}
+		info, err := os.Stat(filepath.Join(h.fileRoot, rel))
+		switch {
+		case err != nil:
+			return "(could not share " + raw + ": not found)"
+		case info.IsDir():
+			rel = strings.TrimSuffix(rel, "/") + "/"
+		case !info.Mode().IsRegular():
+			return "(could not share " + raw + ": only files and folders can be shared)"
 		}
 		if !slices.Contains(files, rel) {
 			files = append(files, rel)
@@ -107,6 +120,10 @@ func (h *APIHandler) attachShares(ctx context.Context, m *Message, s Session) []
 // fileLine is how a shared file appears in a reader's transcript.
 func (h *APIHandler) fileLine(ctx context.Context, m Message, reader string) string {
 	name := filepath.Base(m.File)
+	kind := "file"
+	if strings.HasSuffix(m.File, "/") {
+		kind, name = "folder", name+"/"
+	}
 	if len(m.Mentions) > 0 && reader != m.Sender && !slices.Contains(m.Mentions, reader) {
 		handles := h.roomHandles(ctx, m.Mentions)
 		tagged := []string{}
@@ -115,7 +132,8 @@ func (h *APIHandler) fileLine(ctx context.Context, m Message, reader string) str
 		}
 		return fmt.Sprintf("%s shared %s with %s. It is not for you; ask if you need it.\n", h.memberName(ctx, m.Sender), name, strings.Join(tagged, ", "))
 	}
-	return fmt.Sprintf("Shared file %s on the originating host: %s\n", name, filepath.Join(h.fileRoot, m.File))
+	host, _ := os.Hostname()
+	return fmt.Sprintf("Shared %s %s, at %s on %s\n", kind, name, filepath.Join(h.fileRoot, m.File), host)
 }
 
 // Side chats let two agents in a group talk privately. The owner can read

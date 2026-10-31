@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mace/internal/blobs"
@@ -66,12 +67,7 @@ func (h *APIHandler) sendChunked(ctx context.Context, p Peer, path string) (stri
 		return "", blobs.Manifest{}, err
 	}
 	defer root.Close()
-	f, err := root.Open(path)
-	if err != nil {
-		return "", blobs.Manifest{}, err
-	}
-	defer f.Close()
-	m, err := store.Add(f, filepath.Base(path), "")
+	m, err := addShared(store, root, path)
 	if err != nil {
 		return "", m, err
 	}
@@ -99,7 +95,7 @@ func (h *APIHandler) fetchTransfer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid transfer", 400)
 		return
 	}
-	path, m, err := h.pullFile(r.Context(), from, req.Manifest)
+	path, m, err := h.pullFile(r.Context(), from, req.Manifest, "")
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
@@ -111,8 +107,9 @@ func (h *APIHandler) fetchTransfer(w http.ResponseWriter, r *http.Request) {
 }
 
 // pullFile fetches a manifest and its missing chunks from a node, verifying
-// each, and assembles the file in the inbox.
-func (h *APIHandler) pullFile(ctx context.Context, from Node, id string) (string, blobs.Manifest, error) {
+// each, and assembles the file, or unpacks the folder, in dir (the inbox
+// when dir is empty).
+func (h *APIHandler) pullFile(ctx context.Context, from Node, id, dir string) (string, blobs.Manifest, error) {
 	store, err := h.blobStore()
 	if err != nil {
 		return "", blobs.Manifest{}, err
@@ -146,7 +143,9 @@ func (h *APIHandler) pullFile(ctx context.Context, from Node, id string) (string
 			return "", m, fmt.Errorf("could not get part of %s: %w", m.Name, err)
 		}
 	}
-	dir := h.inboxDir()
+	if dir == "" {
+		dir = h.inboxDir()
+	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", m, err
 	}
@@ -155,7 +154,114 @@ func (h *APIHandler) pullFile(ctx context.Context, from Node, id string) (string
 		name = "file"
 	}
 	dest := filepath.Join(dir, newID()[:8]+"-"+name)
+	if m.Type == blobs.FolderType {
+		return dest, m, store.Extract(m, dest)
+	}
 	return dest, m, store.Assemble(m, dest)
+}
+
+// addShared stores a file or a whole folder under the file root.
+func addShared(store *blobs.Store, root *os.Root, path string) (blobs.Manifest, error) {
+	info, err := root.Stat(path)
+	if err != nil {
+		return blobs.Manifest{}, err
+	}
+	if info.IsDir() {
+		return store.AddFolder(root.FS(), filepath.ToSlash(filepath.Clean(path)), filepath.Base(path))
+	}
+	if !info.Mode().IsRegular() {
+		return blobs.Manifest{}, errors.New("only files and folders can be shared")
+	}
+	f, err := root.Open(path)
+	if err != nil {
+		return blobs.Manifest{}, err
+	}
+	defer f.Close()
+	return store.Add(f, filepath.Base(path), "")
+}
+
+// offerTransfer serves POST /api/v1/transfers/offer from a joined machine:
+// store a file or folder an agent here shared, so the machine can pull it.
+// A relative path is read from the agent's working folder.
+func (h *APIHandler) offerTransfer(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Session string `json:"session"`
+		Path    string `json:"path"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req) != nil || req.Path == "" {
+		http.Error(w, "name the file or folder to share", 400)
+		return
+	}
+	var s Session
+	h.store.Document(r.Context(), "session", req.Session, &s)
+	rel, ok := h.resolveShare(req.Path, s.Directory)
+	if !ok {
+		http.Error(w, req.Path+" is outside the shared file root", 403)
+		return
+	}
+	store, err := h.blobStore()
+	if err != nil {
+		http.Error(w, err.Error(), 503)
+		return
+	}
+	root, err := os.OpenRoot(h.fileRoot)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer root.Close()
+	m, err := addShared(store, root, rel)
+	if err != nil {
+		http.Error(w, "could not share "+req.Path+": "+err.Error(), 404)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"manifest": m.ID(), "name": m.Name, "folder": m.Type == blobs.FolderType})
+}
+
+// resolveShare turns an agent's share path (absolute, ~, or relative to its
+// folder) into a path relative to the file root.
+func (h *APIHandler) resolveShare(raw, dir string) (string, bool) {
+	p := strings.TrimSpace(raw)
+	if strings.HasPrefix(p, "~") {
+		home, _ := os.UserHomeDir()
+		p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+	} else if !filepath.IsAbs(p) {
+		if dir == "" {
+			dir = h.fileRoot
+		}
+		p = filepath.Join(dir, p)
+	}
+	return h.rootRelative(filepath.Clean(p))
+}
+
+// pullShare brings a file or folder that an agent on a joined machine shared
+// into this machine's shares for the conversation, and returns its path
+// relative to the file root.
+func (h *APIHandler) pullShare(ctx context.Context, room, member, path string) (string, error) {
+	peer, session, _ := strings.Cut(member, "::")
+	var p Peer
+	if err := h.peerDoc(ctx, peer, &p); err != nil || p.Node == "" {
+		return "", errors.New("files from hosts connected by token cannot be shared yet")
+	}
+	var n Node
+	if err := h.store.Document(ctx, "node", p.Node, &n); err != nil {
+		return "", err
+	}
+	var offer struct {
+		Manifest string `json:"manifest"`
+	}
+	if err := h.peerRequest(ctx, p, "/transfers/offer", map[string]string{"session": session, "path": path}, &offer); err != nil {
+		return "", err
+	}
+	dest, _, err := h.pullFile(ctx, n, offer.Manifest, h.sharesDir(room))
+	if err != nil {
+		return "", err
+	}
+	rel, ok := h.rootRelative(dest)
+	if !ok {
+		return "", errors.New("the shares folder is outside the file root")
+	}
+	return rel, nil
 }
 
 // inboxDir is where files from other machines are saved, inside the file root.

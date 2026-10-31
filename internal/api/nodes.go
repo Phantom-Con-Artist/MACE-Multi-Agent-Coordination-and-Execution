@@ -39,7 +39,15 @@ type Node struct {
 	URL          string    `json:"url"`
 	JoinedAt     time.Time `json:"joined_at"`
 	IntroducedBy string    `json:"introduced_by,omitempty"`
+	// Protocol is how much the machine's MACE offers other machines.
+	Protocol int `json:"protocol,omitempty"`
 }
+
+// nodeProtocol counts what this MACE offers other machines. Raise it
+// whenever a path joins nodeOwnerPaths or the node protocol changes, so
+// older machines show as needing an update instead of failing quietly.
+// 2: agents, turns, files, apps, transfers (chunked, offers, folders).
+const nodeProtocol = 2
 
 // NodeView adds what this machine currently knows about a node.
 type NodeView struct {
@@ -50,6 +58,8 @@ type NodeView struct {
 	Problem   string     `json:"problem,omitempty"`
 	// Checking means this machine has not tried to reach the node yet.
 	Checking bool `json:"checking,omitempty"`
+	// Outdated means the node runs an older MACE than this one.
+	Outdated bool `json:"outdated,omitempty"`
 }
 
 type joinInvite struct {
@@ -92,7 +102,7 @@ func (h *APIHandler) selfNode() Node {
 	if name == "" {
 		name = h.nodeInfo.HostName
 	}
-	return Node{ID: id.ID, Name: name, PublicKey: id.Public, URL: h.selfURL()}
+	return Node{ID: id.ID, Name: name, PublicKey: id.Public, URL: h.selfURL(), Protocol: nodeProtocol}
 }
 
 var tailnetIP = struct {
@@ -203,7 +213,7 @@ func (h *APIHandler) listNodes(w http.ResponseWriter, r *http.Request) {
 	out := []NodeView{{Node: self, Self: true, Available: true, LastSeen: &now}}
 	h.nodeHealth.mu.Lock()
 	for _, n := range h.knownNodes(r.Context()) {
-		v := NodeView{Node: n, Problem: h.nodeHealth.fail[n.ID]}
+		v := NodeView{Node: n, Problem: h.nodeHealth.fail[n.ID], Outdated: n.Protocol < nodeProtocol}
 		_, tried := h.nodeHealth.fail[n.ID]
 		_, ok := h.nodeHealth.seen[n.ID]
 		v.Checking = !tried && !ok
@@ -445,6 +455,11 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 		return
 	}
 	h.markNode(n.ID, "", asked)
+	if pong.Node.Protocol != n.Protocol {
+		// The machine was updated (or rolled back) since it joined.
+		n.Protocol = pong.Node.Protocol
+		h.store.PutDocument(ctx, "node", n.ID, n)
+	}
 	h.learnNodes(ctx, pong.Nodes, n.ID)
 	if _, err := h.syncFrom(ctx, n); err != nil {
 		log.Printf("[MACE] Sync from %s: %v", n.Name, err)
@@ -556,24 +571,28 @@ func (h *APIHandler) verifyNodeRequest(r *http.Request) (Node, []byte, error) {
 
 // nodeOwnerPaths are the owner's endpoints a joined machine may call on the
 // owner's behalf: agents, their turns and controls, files, and machine health.
-var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|catalog|sessions|metrics|files|apps|host/open|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
+var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|catalog|sessions|metrics|files|apps|host/open|pause-all|transfers/(receive|fetch|offer)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
+
+// errNotOffered refuses a joined machine's request for something this MACE
+// does not offer other machines; a bad signature is refused separately.
+var errNotOffered = errors.New("This machine does not offer that to other machines.")
 
 // nodeAuthorized checks a signed request from a joined machine to an owner
 // endpoint, leaving its body readable for the handler.
-func (h *APIHandler) nodeAuthorized(r *http.Request) bool {
+func (h *APIHandler) nodeAuthorized(r *http.Request) error {
 	if strings.HasPrefix(r.URL.Path, "/api/v1/node/") {
 		// Node protocol handlers check signatures themselves.
-		return true
-	}
-	if !nodeOwnerPaths.MatchString(r.URL.Path) {
-		return false
+		return nil
 	}
 	_, body, err := h.verifyNodeRequest(r)
 	if err != nil {
-		return false
+		return err
+	}
+	if !nodeOwnerPaths.MatchString(r.URL.Path) {
+		return errNotOffered
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	return true
+	return nil
 }
 
 // nodeRefused is a node's non-success answer.

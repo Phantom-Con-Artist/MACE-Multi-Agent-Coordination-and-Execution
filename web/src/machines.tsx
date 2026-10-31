@@ -8,7 +8,7 @@ import { AppTile } from "./messenger-parts";
 // selected machine's agents, folders, and apps sit below, so browsing a
 // worker reads exactly like browsing this computer.
 
-export type Machine = { id: string; name: string; self: boolean; available: boolean };
+export type Machine = { id: string; name: string; self: boolean; available: boolean; outdated?: boolean };
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type App = { id: string; name: string; category?: string };
 type Provider = { id: string; name: string; available: boolean };
@@ -176,6 +176,13 @@ export function Machines(props: {
             <i key={m.id} className={i === index ? "on" : ""} />
           ))}
         </div>
+      )}
+
+      {current.outdated && current.available && (
+        <p className="machine-problem">
+          {current.name} runs an older MACE, so some of this may not work there yet. On that machine run{" "}
+          <code>git pull && make install && systemctl --user restart mace</code>.
+        </p>
       )}
 
       <div className="machine-tabs" role="tablist" aria-label={"What is on " + current.name}>

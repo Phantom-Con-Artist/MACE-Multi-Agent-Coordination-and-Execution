@@ -87,3 +87,14 @@ func TestLeadBriefsThenDividesByCapability(t *testing.T) {
 		t.Errorf("workers should wait for an assignment:\n%s", worker)
 	}
 }
+
+func TestABriefToTheLeadWakesOnlyTheLead(t *testing.T) {
+	tm := newTeam(t, "ari", "bo")
+	room := leadGroup(t, tm, "ari", "ari", "bo")
+	tm.set("ari", "reply.txt", "[PASS]")
+	tm.say(t, room.ID, "@lead plan this, @agy-2 will help you")
+	settled(t, tm.s, room.ID)
+	if b, _ := os.ReadFile(tm.timeline); strings.Contains(string(b), "start bo") {
+		t.Fatal("coworkers named in a brief to the lead wait for the lead's plan")
+	}
+}

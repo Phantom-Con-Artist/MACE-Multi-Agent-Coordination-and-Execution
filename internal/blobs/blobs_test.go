@@ -1,6 +1,7 @@
 package blobs
 
 import (
+	"archive/tar"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -58,5 +59,51 @@ func TestDamagedChunksAreNotServed(t *testing.T) {
 	os.WriteFile(s.path(h), []byte("HELLO"), 0600)
 	if _, err := s.Get(h); err == nil || s.Has(h) {
 		t.Fatal("a damaged chunk should be refused and removed")
+	}
+}
+
+func TestFoldersPackAndUnpackSafely(t *testing.T) {
+	src := t.TempDir()
+	os.MkdirAll(filepath.Join(src, "site", "css"), 0700)
+	os.MkdirAll(filepath.Join(src, ".git"), 0700)
+	os.MkdirAll(filepath.Join(src, "node_modules", "x"), 0700)
+	os.WriteFile(filepath.Join(src, "site", "index.html"), []byte("<h1>hi</h1>"), 0600)
+	os.WriteFile(filepath.Join(src, "site", "css", "a.css"), []byte("h1{}"), 0600)
+	os.WriteFile(filepath.Join(src, ".git", "HEAD"), []byte("ref"), 0600)
+	os.WriteFile(filepath.Join(src, "node_modules", "x", "i.js"), []byte("x"), 0600)
+	os.Symlink("/etc/passwd", filepath.Join(src, "site", "link"))
+	s, _ := Open(t.TempDir())
+	m, err := s.AddFolder(os.DirFS(src), ".", "project")
+	if err != nil || m.Type != FolderType {
+		t.Fatalf("%+v %v", m, err)
+	}
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := s.Extract(m, dest); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "site", "css", "a.css")); string(b) != "h1{}" {
+		t.Fatal("nested files should arrive")
+	}
+	for _, gone := range []string{".git", "node_modules", "site/link"} {
+		if _, err := os.Lstat(filepath.Join(dest, gone)); err == nil {
+			t.Fatalf("%s should not be shared", gone)
+		}
+	}
+}
+
+func TestPackagesCannotWriteOutsideTheirFolder(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	tw.WriteHeader(&tar.Header{Name: "../escape.txt", Typeflag: tar.TypeReg, Mode: 0600, Size: 2})
+	tw.Write([]byte("no"))
+	tw.Close()
+	s, _ := Open(t.TempDir())
+	m, _ := s.Add(&buf, "evil", FolderType)
+	root := t.TempDir()
+	if err := s.Extract(m, filepath.Join(root, "in")); err == nil {
+		t.Fatal("a path that leaves the folder must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(root, "escape.txt")); err == nil {
+		t.Fatal("nothing may be written outside the folder")
 	}
 }

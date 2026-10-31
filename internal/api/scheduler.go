@@ -410,7 +410,11 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 		if group == nil {
 			priority = priorityDirect
 		}
-		if len(m.Mentions) > 0 {
+		if len(m.Mentions) > 0 && p.Mode == "team" && slices.Contains(m.Mentions, p.Lead) && h.available(ctx, p.Lead) {
+			// Addressed to the lead, a brief goes to the lead alone; the
+			// coworkers it names hear from the lead's plan, not all at once.
+			targets = []string{p.Lead}
+		} else if len(m.Mentions) > 0 {
 			targets = m.Mentions
 		} else if p.Mode == "team" && h.available(ctx, p.Lead) {
 			// In a team the lead takes the owner's unaddressed messages.

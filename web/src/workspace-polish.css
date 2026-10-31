@@ -1965,3 +1965,26 @@
   align-items: center;
   gap: 10px;
 }
+
+/* A shared folder in a chat: a row that opens it in Files. */
+.app .folder-share {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+}
+.app .folder-share span {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+.app .folder-share small {
+  color: var(--muted);
+  font-size: var(--font-small);
+}

@@ -260,7 +260,11 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 		}
 		text := m.Text
 		if m.File != "" {
-			text += "\n[Shared file: " + filepath.Join(h.fileRoot, m.File) + "]"
+			kind := "file"
+			if strings.HasSuffix(m.File, "/") {
+				kind = "folder"
+			}
+			text += "\n[Shared " + kind + ": " + filepath.Join(h.fileRoot, m.File) + "]"
 		}
 		if found {
 			text = fmt.Sprintf("[MACE room %s | from %s]\n%s", id, m.Sender, text)

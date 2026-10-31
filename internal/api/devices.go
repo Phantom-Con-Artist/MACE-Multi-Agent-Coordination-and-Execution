@@ -36,7 +36,7 @@ type devices struct {
 	secret string
 	mu     sync.Mutex
 	// node authorizes a request signed by one of the owner's joined machines.
-	node func(*http.Request) bool
+	node func(*http.Request) error
 }
 
 func hashHex(s string) string { sum := sha256.Sum256([]byte(s)); return hex.EncodeToString(sum[:]) }
@@ -135,7 +135,10 @@ func (d *devices) middleware(next http.Handler) http.Handler {
 		// The owner's other machines act for the owner on the paths that
 		// carry their work, signed with their node key.
 		if r.Header.Get("X-Mace-Node") != "" && d.node != nil {
-			if !d.node(r) {
+			if err := d.node(r); err == errNotOffered {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			} else if err != nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

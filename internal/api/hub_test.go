@@ -118,7 +118,7 @@ func TestSignedRequestsReachOnlyTheOwnerPathsMeantForMachines(t *testing.T) {
 		t.Fatalf("listing agents is a machine path: %v", err)
 	}
 	err := hub.s.handler.peerRequest(context.Background(), p, "/rooms", map[string]any{"name": "x"}, &Room{})
-	if err == nil || !strings.Contains(err.Error(), "401") {
+	if err == nil || !strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "older MACE") {
 		t.Fatalf("creating groups on another machine is the owner's alone: %v", err)
 	}
 	stranger := newMachine(t, "stranger")
@@ -176,5 +176,90 @@ func TestTheHubBrowsesAWorkersFilesAndApps(t *testing.T) {
 	}
 	if code, _, _ := get(base+"/rooms", nil); code != 404 {
 		t.Fatalf("only machine paths are forwarded: %d", code)
+	}
+}
+
+func TestWorkerAgentsShareFilesAndFoldersIntoHubGroups(t *testing.T) {
+	hub, _, agent, dir := hubAndWorker(t)
+	os.MkdirAll(filepath.Join(dir, "draft", "css"), 0700)
+	os.WriteFile(filepath.Join(dir, "draft", "index.html"), []byte("<h1>draft</h1>"), 0600)
+	os.WriteFile(filepath.Join(dir, "draft", "css", "a.css"), []byte("h1{}"), 0600)
+	os.WriteFile(filepath.Join(dir, "notes.md"), []byte("research notes"), 0600)
+	os.WriteFile(filepath.Join(dir, "reply.txt"), []byte("here [share: draft] and [share: notes.md]"), 0600)
+	node, _, _ := strings.Cut(agent, "::")
+	hub.owner(t, "GET", "/api/v1/peers/"+node+"/sessions", nil, &[]Session{}) // as the app does
+	var room Room
+	if c := hub.owner(t, "POST", "/api/v1/rooms", map[string]any{"name": "Team", "members": []string{agent}}, &room); c != 201 {
+		t.Fatalf("group: %d", c)
+	}
+	hub.owner(t, "POST", "/api/v1/chats/"+room.ID+"/messages", map[string]string{"text": "send your drafts"}, nil)
+	settled(t, hub.s, room.ID)
+	var msgs []Message
+	hub.owner(t, "GET", "/api/v1/chats/"+room.ID+"/messages", nil, &msgs)
+	got := map[string]string{}
+	for _, m := range msgs {
+		if m.File != "" {
+			got[filepath.Base(strings.TrimSuffix(m.File, "/"))] = m.File
+		}
+		if strings.Contains(m.Text, "could not share") {
+			t.Fatalf("both shares should arrive: %q", m.Text)
+		}
+	}
+	folder := got[firstKey(got, "draft")]
+	if !strings.HasSuffix(folder, "/") {
+		t.Fatalf("the folder should be attached as a folder: %v", got)
+	}
+	if b, _ := os.ReadFile("/" + folder + "css/a.css"); string(b) != "h1{}" {
+		t.Fatalf("the hub should hold a copy of the whole folder at %s", folder)
+	}
+	if b, _ := os.ReadFile("/" + got[firstKey(got, "notes.md")]); string(b) != "research notes" {
+		t.Fatalf("the hub should hold the file: %v", got)
+	}
+}
+
+// firstKey finds the attachment whose name ends with suffix (names carry a
+// unique prefix).
+func firstKey(m map[string]string, suffix string) string {
+	for k := range m {
+		if strings.HasSuffix(k, suffix) {
+			return k
+		}
+	}
+	return ""
+}
+
+func TestTheHubSendsWholeFoldersToWorkers(t *testing.T) {
+	hub, _, agent, _ := hubAndWorker(t)
+	node, _, _ := strings.Cut(agent, "::")
+	src := filepath.Join(t.TempDir(), "site")
+	os.MkdirAll(filepath.Join(src, "img"), 0700)
+	os.WriteFile(filepath.Join(src, "index.html"), []byte("<p>ok</p>"), 0600)
+	os.WriteFile(filepath.Join(src, "img", "logo.svg"), []byte("<svg/>"), 0600)
+	dest, err := hub.s.handler.transfer(context.Background(), node, strings.TrimPrefix(src, "/")+"/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "img", "logo.svg")); string(b) != "<svg/>" {
+		t.Fatalf("the worker should hold the folder at %s", dest)
+	}
+}
+
+func TestOutdatedMachinesAreFlaggedUntilTheyUpdate(t *testing.T) {
+	hub, worker, _, _ := hubAndWorker(t)
+	ctx := context.Background()
+	id := worker.s.handler.selfNode().ID
+	var n Node
+	hub.s.handler.store.Document(ctx, "node", id, &n)
+	if n.Protocol != nodeProtocol {
+		t.Fatalf("a joining machine should report its version: %d", n.Protocol)
+	}
+	n.Protocol = 1 // as if the worker ran an older MACE
+	hub.s.handler.store.PutDocument(ctx, "node", id, n)
+	if !hub.nodes(t)["worker"].Outdated {
+		t.Fatal("an older machine should be flagged")
+	}
+	hub.s.handler.checkNode(ctx, n, 0) // the next check sees the update
+	if hub.nodes(t)["worker"].Outdated {
+		t.Fatal("the flag should clear once the machine reports the current version")
 	}
 }

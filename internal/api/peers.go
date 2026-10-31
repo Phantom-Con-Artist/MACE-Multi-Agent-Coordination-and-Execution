@@ -73,7 +73,12 @@ func (h *APIHandler) peerRequest(ctx context.Context, p Peer, path string, body 
 		if body != nil {
 			method = "POST"
 		}
-		return h.signedRequest(ctx, p.Name, p.URL, method, "/api/v1"+path, body, result, timeout)
+		err := h.signedRequest(ctx, p.Name, p.URL, method, "/api/v1"+path, body, result, timeout)
+		var refused *nodeRefused
+		if errors.As(err, &refused) && (refused.status == http.StatusUnauthorized || refused.status == http.StatusForbidden) && h.outdated(ctx, p.Node) {
+			return outdatedError(p.Name)
+		}
+		return err
 	}
 	var data []byte
 	var e error
@@ -214,6 +219,7 @@ func (h *APIHandler) transfer(ctx context.Context, peer, path string) (string, e
 	if e := h.peerDoc(ctx, peer, &p); e != nil {
 		return "", e
 	}
+	path = strings.TrimSuffix(path, "/")
 	if p.Node != "" {
 		dest, m, e := h.sendChunked(ctx, p, path)
 		if e != nil {
@@ -377,4 +383,16 @@ func (h *APIHandler) peerCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// outdatedError explains a joined machine refusing a signed request: its
+// MACE is older and does not offer that yet.
+func outdatedError(name string) error {
+	return fmt.Errorf("%s runs an older MACE that does not offer this yet. Update it there: git pull && make install && systemctl --user restart mace", name)
+}
+
+// outdated reports whether a joined machine last reported an older MACE.
+func (h *APIHandler) outdated(ctx context.Context, node string) bool {
+	var n Node
+	return h.store.Document(ctx, "node", node, &n) == nil && n.Protocol < nodeProtocol
 }
