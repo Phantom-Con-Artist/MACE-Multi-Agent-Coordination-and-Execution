@@ -27,28 +27,81 @@ var ErrHeadMoved = errors.New("the record chain moved; retry")
 // AppendRecord stores a record that extends its node's chain in its
 // conversation, provided the chain still ends at expectPrev.
 func (s *Store) AppendRecord(ctx context.Context, r RecordRow, expectPrev string) error {
+	return s.AppendRecords(ctx, []RecordRow{r}, expectPrev)
+}
+
+// AppendRecords stores consecutive records of one node's chain in one
+// conversation, oldest first, provided the chain still ends at expectPrev and
+// each record links to the one before it.
+func (s *Store) AppendRecords(ctx context.Context, rows []RecordRow, expectPrev string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	node, conversation := rows[0].Node, rows[0].Conversation
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	var head string
-	err = tx.QueryRowContext(ctx, `SELECT head FROM heads WHERE node=? AND conversation=?`, r.Node, r.Conversation).Scan(&head)
+	err = tx.QueryRowContext(ctx, `SELECT head FROM heads WHERE node=? AND conversation=?`, node, conversation).Scan(&head)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if head != expectPrev || r.Prev != expectPrev {
+	if head != expectPrev {
 		return ErrHeadMoved
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO records(id, node, conversation, wall, count, prev, kind, ref, cached, data) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Node, r.Conversation, r.Wall, r.Count, r.Prev, r.Kind, r.Ref, r.Cached, string(r.Data)); err != nil {
-		return err
+	prev := expectPrev
+	for _, r := range rows {
+		if r.Node != node || r.Conversation != conversation || r.Prev != prev {
+			return ErrHeadMoved
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO records(id, node, conversation, wall, count, prev, kind, ref, cached, data) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			r.ID, r.Node, r.Conversation, r.Wall, r.Count, r.Prev, r.Kind, r.Ref, r.Cached, string(r.Data)); err != nil {
+			return err
+		}
+		prev = r.ID
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO heads(node, conversation, head) VALUES(?,?,?) ON CONFLICT(node, conversation) DO UPDATE SET head=excluded.head`,
-		r.Node, r.Conversation, r.ID); err != nil {
+		node, conversation, prev); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ChainHead is the newest record of one node's chain in one conversation.
+type ChainHead struct {
+	Node         string `json:"node"`
+	Conversation string `json:"conversation"`
+	Head         string `json:"head"`
+}
+
+// AllHeads lists every chain this store holds, its own and cached ones.
+func (s *Store) AllHeads(ctx context.Context) ([]ChainHead, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node, conversation, head FROM heads ORDER BY conversation, node`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ChainHead{}
+	for rows.Next() {
+		var h ChainHead
+		if err := rows.Scan(&h.Node, &h.Conversation, &h.Head); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// RecordByID returns one stored record.
+func (s *Store) RecordByID(ctx context.Context, id string) (RecordRow, error) {
+	var r RecordRow
+	var data string
+	err := s.db.QueryRowContext(ctx, `SELECT id, node, conversation, wall, count, prev, kind, ref, cached, data FROM records WHERE id=?`, id).
+		Scan(&r.ID, &r.Node, &r.Conversation, &r.Wall, &r.Count, &r.Prev, &r.Kind, &r.Ref, &r.Cached, &data)
+	r.Data = []byte(data)
+	return r, err
 }
 
 // RecordHead returns the newest record of a node's chain in a conversation,
@@ -125,3 +178,7 @@ func (s *Store) ConversationRecords(ctx context.Context, conversation string) ([
 
 // Path reports where the store lives, ":memory:" for an in-memory store.
 func (s *Store) Path() string { return s.path }
+
+// DB exposes the database for maintenance tools and tests that need to
+// inspect or damage stored data directly.
+func (s *Store) DB() *sql.DB { return s.db }

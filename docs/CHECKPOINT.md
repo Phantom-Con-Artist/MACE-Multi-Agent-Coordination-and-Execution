@@ -20,6 +20,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 14. Hub and worker step 3, joining: `mace join --invite`, `mace join <address> <code>`, `mace machines`; signed node requests, introductions, availability every 15 s (`internal/api/nodes.go`, `cmd/mace/nodes.go`). Checked live with three isolated servers on the tailnet address 100.94.153.17. QR moved to step 6.
 
+15. Hub and worker step 4, first slice, record sync (`internal/api/sync.go`): heads and chain endpoints, verified incremental fetch, cached copies relayed through other nodes, merged view at `GET /api/v1/records/{conversation}` with offline nodes, sync after each availability check. Checked live between two isolated servers on the tailnet.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
@@ -32,7 +34,7 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 Follow the build order in docs/DESIGN-HUB-WORKER.md:
 
-4. Hub: head comparison, chain walking, read-only caches, merged views, routing actions to owner nodes, offline gaps in the interface. Switch the interface from messages to records here.
+4. Hub, rest of the step: the interface reads `GET /records/{conversation}` instead of messages, agents from every node in one list, the owner's actions routed to the owning node (node-signed, which widens node auth beyond `/api/v1/node/`), offline gaps shown in chats. Sync is done.
 5. Chunked, content-addressed files and transfers (absorbs the transfer part of phase 3).
 6. `mace-server start` with the Tailscale HTTPS link, QR sign-in, home-screen install, notifications, and a hub switcher on the phone.
 

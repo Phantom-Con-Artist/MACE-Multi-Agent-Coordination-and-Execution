@@ -445,6 +445,9 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 	}
 	h.markNode(n.ID, "", asked)
 	h.learnNodes(ctx, pong.Nodes, n.ID)
+	if _, err := h.syncFrom(ctx, n); err != nil {
+		log.Printf("[MACE] Sync from %s: %v", n.Name, err)
+	}
 }
 
 func (h *APIHandler) watchNodes(ctx context.Context) {
