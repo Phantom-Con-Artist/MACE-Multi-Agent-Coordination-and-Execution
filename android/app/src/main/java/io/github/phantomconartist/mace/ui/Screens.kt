@@ -57,7 +57,7 @@ fun SignInScreen(state: Screen.SignIn, onSignIn: (String) -> Unit) {
     ) {
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.size(96.dp).padding(bottom = 8.dp))
-            Text("Connect to your hub", style = MaterialTheme.typography.displaySmall, modifier = Modifier.semantics { heading() })
+            Text("Connect to your hub", style = MaterialTheme.typography.displaySmall, color = Mace.colors.text, modifier = Modifier.semantics { heading() })
             Text(
                 "On your computer, open MACE, then Settings, Phone, and copy the sign-in link. Paste it here. It works once and lasts ten minutes.",
                 style = MaterialTheme.typography.bodyLarge,

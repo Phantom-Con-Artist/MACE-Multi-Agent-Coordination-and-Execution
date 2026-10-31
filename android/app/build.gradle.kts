@@ -22,7 +22,7 @@ val signing = Properties().apply {
 
 android {
     namespace = "io.github.phantomconartist.mace"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.phantomconartist.mace"

@@ -14,7 +14,6 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import io.github.phantomconartist.mace.R
 
@@ -72,13 +71,13 @@ private fun archivo(weight: Int) = Font(
 val Archivo = FontFamily(archivo(400), archivo(500), archivo(600), archivo(700), archivo(800))
 
 private val Type = Typography(
-    displaySmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W800, fontSize = 34.sp, lineHeight = 36.sp, letterSpacing = (-0.03).em),
-    headlineSmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W700, fontSize = 24.sp, lineHeight = 28.sp, letterSpacing = (-0.02).em),
-    titleMedium = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W600, fontSize = 17.sp, lineHeight = 22.sp, letterSpacing = (-0.01).em),
-    bodyLarge = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W400, fontSize = 17.sp, lineHeight = 25.sp, letterSpacing = (-0.01).em),
+    displaySmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W800, fontSize = 34.sp, lineHeight = 36.sp, letterSpacing = (-1.0).sp),
+    headlineSmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W700, fontSize = 24.sp, lineHeight = 28.sp, letterSpacing = (-0.5).sp),
+    titleMedium = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W600, fontSize = 17.sp, lineHeight = 22.sp, letterSpacing = (-0.2).sp),
+    bodyLarge = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W400, fontSize = 17.sp, lineHeight = 25.sp, letterSpacing = (-0.2).sp),
     bodyMedium = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W400, fontSize = 15.sp, lineHeight = 21.sp),
     labelLarge = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W600, fontSize = 15.sp, lineHeight = 20.sp),
-    labelSmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W600, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.08.em),
+    labelSmall = TextStyle(fontFamily = Archivo, fontWeight = FontWeight.W600, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.9.sp),
 )
 
 @Composable
