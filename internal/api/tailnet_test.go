@@ -109,3 +109,31 @@ func TestPhonesOnTheOwnersAccountSignInThroughTailscaleServe(t *testing.T) {
 		t.Fatal("trust can be turned off")
 	}
 }
+
+func TestForwardingHeadersCannotBorrowTheOwnersDevice(t *testing.T) {
+	m := newMachine(t, "hub")
+	m.s.handler.tail.source = func() (tailnetView, error) {
+		return tailnetView{User: "u-me", Login: "me@example.com", Peers: []tailnetPeer{{Host: "pc", IPs: []string{"100.1.1.1"}, User: "u-me", Online: true}}}, nil
+	}
+	session := func(remote string, headers map[string]string) bool {
+		r := httptest.NewRequest("GET", "/api/session", nil)
+		r.RemoteAddr = remote
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		m.s.Router().ServeHTTP(w, r)
+		var out map[string]bool
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out["connected"]
+	}
+	if session("192.168.0.9:4000", map[string]string{"X-Forwarded-For": "100.1.1.1", "X-Real-IP": "100.1.1.1"}) {
+		t.Fatal("a LAN device claiming the owner's tailnet address must not sign in")
+	}
+	if session("192.168.0.9:4000", map[string]string{"Tailscale-User-Login": "me@example.com"}) {
+		t.Fatal("the identity header counts only from tailscale serve on this machine")
+	}
+	if !session("100.1.1.1:4000", nil) {
+		t.Fatal("the owner's own device connecting directly should sign in")
+	}
+}

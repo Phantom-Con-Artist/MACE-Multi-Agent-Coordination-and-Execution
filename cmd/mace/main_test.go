@@ -72,7 +72,7 @@ func TestTailnetNameComesFromTailscaleStatus(t *testing.T) {
 	if _, err := parseTailnetName([]byte(`{"BackendState":"Stopped"}`)); err == nil {
 		t.Fatal("a stopped Tailscale must be reported")
 	}
-	if _, err := parseTailnetName([]byte(`{"BackendState":"Running","Self":{"DNSName":""}}`)); err == nil {
-		t.Fatal("a machine without a tailnet name must be reported")
+	if _, err := parseTailnetName([]byte(`{"BackendState":"Running","Self":{"DNSName":"fedora.tail1234.ts.net."}}`)); err == nil {
+		t.Fatal("a tailnet without HTTPS certificates must be reported, not waited on")
 	}
 }

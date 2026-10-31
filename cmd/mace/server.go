@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,14 +52,12 @@ func parseTailnetName(out []byte) (string, error) {
 	if st.BackendState != "Running" {
 		return "", fmt.Errorf("Tailscale is %s. Run sudo tailscale up, then mace-server start again", strings.ToLower(st.BackendState))
 	}
-	name := strings.TrimSuffix(st.Self.DNSName, ".")
-	if len(st.CertDomains) > 0 {
-		name = st.CertDomains[0]
+	// Without HTTPS certificates tailscale serve waits for them to be turned
+	// on instead of failing, so check first.
+	if len(st.CertDomains) == 0 || st.CertDomains[0] == "" {
+		return "", errors.New("HTTPS is off for your tailnet. Turn on MagicDNS and HTTPS Certificates at https://login.tailscale.com/admin/dns, then run this again")
 	}
-	if name == "" {
-		return "", errors.New("this machine has no tailnet name. Turn on MagicDNS and HTTPS certificates in the Tailscale admin console (DNS page)")
-	}
-	return name, nil
+	return st.CertDomains[0], nil
 }
 
 func serverCommand(args []string) error {
@@ -166,7 +165,12 @@ func (c settings) serverSetup(args []string) error {
 }
 
 func (c settings) serve() error {
-	out, err := exec.Command("tailscale", "serve", "--bg", "--https=443", "http://127.0.0.1:"+strconv.Itoa(c.Port)).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tailscale", "serve", "--bg", "--https=443", "http://127.0.0.1:"+strconv.Itoa(c.Port)).CombinedOutput()
+	if ctx.Err() != nil {
+		return errors.New("tailscale serve did not finish in 30 seconds; check that HTTPS is on for your tailnet, then run this again")
+	}
 	if err == nil {
 		return nil
 	}

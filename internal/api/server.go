@@ -49,6 +49,9 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 
 	// Standard middleware
 	r.Use(middleware.RequestID)
+	// Trust decisions need the address the connection really came from, which
+	// RealIP replaces with a client-supplied header; keep it first.
+	r.Use(keepConnAddr)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(func(next http.Handler) http.Handler {

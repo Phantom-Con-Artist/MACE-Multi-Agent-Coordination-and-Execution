@@ -138,7 +138,7 @@ func (h *APIHandler) ownerRequest(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip, _, _ := net.SplitHostPort(connAddr(r))
 	if parsed := net.ParseIP(ip); parsed != nil && parsed.IsLoopback() {
 		if login := r.Header.Get("Tailscale-User-Login"); login != "" && v.Login != "" {
 			return strings.EqualFold(login, v.Login)
@@ -333,4 +333,22 @@ func (h *APIHandler) joinDevice(ctx context.Context, self Node, base string) boo
 	h.learnNodes(ctx, pong.Nodes, them.ID)
 	log.Printf("[MACE] Joined %s through your Tailscale account.", pong.Node.Name)
 	return true
+}
+
+type connAddrKey struct{}
+
+// keepConnAddr records the connection's own address before anything
+// rewrites RemoteAddr from forwarding headers, which a client can set.
+func keepConnAddr(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), connAddrKey{}, r.RemoteAddr)))
+	})
+}
+
+// connAddr is the address the request's connection came from.
+func connAddr(r *http.Request) string {
+	if a, ok := r.Context().Value(connAddrKey{}).(string); ok {
+		return a
+	}
+	return r.RemoteAddr
 }
