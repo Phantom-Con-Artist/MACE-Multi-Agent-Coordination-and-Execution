@@ -55,6 +55,8 @@ type APIHandler struct {
 	bindHost string
 	// tail caches this device's view of the owner's tailnet.
 	tail tailnetState
+	// remoteRuns holds turns other machines asked for, by key.
+	remoteRuns remoteRuns
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {

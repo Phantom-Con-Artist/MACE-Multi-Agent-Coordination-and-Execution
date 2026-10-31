@@ -47,7 +47,8 @@ type Node struct {
 // whenever a path joins nodeOwnerPaths or the node protocol changes, so
 // older machines show as needing an update instead of failing quietly.
 // 2: agents, turns, files, apps, transfers (chunked, offers, folders).
-const nodeProtocol = 2
+// 3: turns survive dropped connections and resume by key.
+const nodeProtocol = 3
 
 // NodeView adds what this machine currently knows about a node.
 type NodeView struct {

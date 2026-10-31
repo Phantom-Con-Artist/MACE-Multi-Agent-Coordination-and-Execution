@@ -240,18 +240,41 @@ func truncate(s string, n int) string {
 func (h *APIHandler) remoteTurn(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt string `json:"prompt"`
+		Key    string `json:"key"`
+		Cancel string `json:"cancel"`
 		turnPrompt
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req) != nil || (req.Prompt == "" && req.Full == "") {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&req) != nil || (req.Key != "" && !turnKeyPattern.MatchString(req.Key)) {
+		http.Error(w, "invalid turn", 400)
+		return
+	}
+	id := routeParam(r, "id")
+	// Keys are scoped to the machine that asked, so one machine cannot
+	// collect or stop another's turn.
+	key := r.Header.Get("X-Mace-Node") + "|" + id + "|" + req.Key
+	if req.Cancel != "" && req.Key != "" {
+		h.remoteRuns.stop(key)
+		writeJSON(w, 200, map[string]any{})
+		return
+	}
+	if req.Prompt == "" && req.Full == "" {
 		http.Error(w, "prompt required", 400)
 		return
 	}
 	if req.Full == "" {
 		req.Full = req.Prompt
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), turnLimit())
-	defer cancel()
-	res, e := h.turn(ctx, routeParam(r, "id"), req.turnPrompt, "peer", nil)
+	var res turnResult
+	var e error
+	if req.Key != "" {
+		res, e = h.remoteRuns.join(r.Context(), key, func(ctx context.Context) (turnResult, error) {
+			return h.turn(ctx, id, req.turnPrompt, "peer", nil)
+		})
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), turnLimit())
+		defer cancel()
+		res, e = h.turn(ctx, id, req.turnPrompt, "peer", nil)
+	}
 	if e != nil {
 		http.Error(w, e.Error(), 502)
 		return

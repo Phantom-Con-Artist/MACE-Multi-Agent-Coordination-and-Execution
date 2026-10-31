@@ -129,7 +129,15 @@ Still to do: workers on other machines reach the hub's context and code graph th
 
 `[share: path]` attaches a file or a whole folder, from any agent on any machine. An agent on a worker shares by path on its own machine: the hub asks the worker to offer it (`POST /transfers/offer`, signed), pulls the chunks, and attaches its copy, so everyone in the group can open it; agents on other workers receive their own copy before their next turn. Folders travel as one chunked tar package of plain files and folders (skipping `.git`, `node_modules`, `.venv`, `__pycache__`, `graphify-out`; at most 20,000 files and 2 GiB) and unpack only inside their destination, with nothing left behind on failure. A folder attachment's path ends in `/`; chats show it as a folder that opens in Files, and the owner can attach a whole folder from the file picker. Long pasted code blocks become files for agents on every machine.
 
-Machines report a protocol version (`nodeProtocol`, now 2) with every check. A machine on an older version shows as needing an update in the app and in `mace machines`, and a request it refuses for that reason says how to update it. A path a current machine does not offer is refused with 403, kept distinct from a bad signature (401).
+Machines report a protocol version (`nodeProtocol`, now 3) with every check. A machine on an older version shows as needing an update in the app and in `mace machines`, and a request it refuses for that reason says how to update it. A path a current machine does not offer is refused with 403, kept distinct from a bad signature (401).
+
+## Turns that survive the network
+
+A turn for an agent on another machine is one long signed request (`internal/api/resume.go`). From protocol 3 it carries a key. The worker runs the turn detached from the request, so a dropped connection does not stop the agent, and keeps the result for 30 minutes. The hub retries on connection errors (not on an answer from the worker) with exponential backoff and full jitter, capped at 30 s, until the turn limit; a retry with the same key joins the running turn or collects its result, so the agent runs once. Keys are scoped to the asking machine. When the owner pauses or stops on the hub, the hub tells the worker to cancel that key. Older workers keep the single request.
+
+Two loop guards sit on replies: a room pauses when agents repeat each other three times, and a single agent's reply to coworkers that nearly copies one of its own last three messages is dropped as [PASS] (Jaccard index of word pairs, 0.7 or more). Turns started by the owner are never dropped this way.
+
+The daemon tells systemd it is ready and pings its watchdog every 30 s while `/health` answers through its own listener and the database responds (`internal/sdnotify`). A daemon that is alive but stuck stops pinging and is restarted after 60 s.
 
 ## Trust through Tailscale
 

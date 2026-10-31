@@ -39,7 +39,9 @@ func (c settings) unit(executable, path string) string {
 	fmt.Fprintf(&b, "PIDFile=%s\n", c.PIDFile)
 	fmt.Fprintf(&b, "ExecStart=%s start --port %d --host %s\n", quoteUnit(executable), c.Port, c.Host)
 	fmt.Fprintf(&b, "ExecStop=%s stop\n", quoteUnit(executable))
-	b.WriteString("Restart=on-failure\nRestartSec=5\nTimeoutStartSec=40\n")
+	// The daemon pings every 30 seconds while it answers HTTP and reaches its
+	// database; a stuck daemon is restarted.
+	b.WriteString("Restart=on-failure\nRestartSec=5\nTimeoutStartSec=40\nWatchdogSec=60\n")
 	fmt.Fprintf(&b, "Environment=%s\n", quoteUnit("PATH="+path))
 	b.WriteString("Environment=MACE_SERVICE=1\n")
 	for _, key := range []string{"MACE_HOME", "MACE_PID_FILE", "MACE_LOG_FILE", "MACE_DB_PATH", "MACE_WEB_DIR", "MACE_DAEMON", "MACE_PUBLIC_URL", "MACE_TAILSCALE_TRUST"} {

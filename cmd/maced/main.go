@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,6 +22,7 @@ import (
 	"mace/internal/bootstrap"
 	"mace/internal/concurrency"
 	"mace/internal/network/tailscale"
+	"mace/internal/sdnotify"
 	"mace/internal/storage"
 	"mace/pkg/protocol"
 )
@@ -29,6 +32,8 @@ var (
 )
 
 func main() {
+	// Read before anything starts a child process, so agents cannot inherit it.
+	systemd := sdnotify.FromEnv()
 	roleFlag := flag.String("role", getEnv("MACE_NODE_ROLE", "worker"), "Operational role: 'worker' or 'controller'")
 	hostFlag := flag.String("host", getEnv("MACE_HTTP_HOST", "0.0.0.0"), "HTTP host to bind")
 	portFlag := flag.Int("port", getEnvInt("MACE_HTTP_PORT", 8080), "HTTP port to bind")
@@ -159,6 +164,10 @@ func main() {
 			log.Printf("[MACE] Could not write readiness record: %v", err)
 		}
 	}
+	systemd.Notify("READY=1")
+	go systemd.Watch(ctx, func(check context.Context) error {
+		return healthy(check, listener.Addr().String(), store)
+	})
 
 	// 6. Handle Shutdown Signals
 	sigCh := make(chan os.Signal, 1)
@@ -183,10 +192,39 @@ wait:
 		}
 	}
 
+	systemd.Notify("STOPPING=1")
 	cancel()
 	group.Stop(5 * time.Second)
 	_ = agentSupervisor.Close()
 	log.Printf("[MACE] Daemon terminated cleanly.")
+}
+
+// healthy reports whether the daemon still answers HTTP through its own
+// listener and can reach its database, for the systemd watchdog.
+func healthy(ctx context.Context, addr string, store *storage.Store) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return err
+	}
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		host = "127.0.0.1"
+		if ip != nil && ip.To4() == nil {
+			host = "::1"
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://"+net.JoinHostPort(host, port)+"/health", nil)
+	if err != nil {
+		return err
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("health answered %d", res.StatusCode)
+	}
+	return store.DB().PingContext(ctx)
 }
 
 func getEnv(key, fallback string) string {

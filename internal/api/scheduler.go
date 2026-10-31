@@ -651,6 +651,10 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		text = strings.TrimSpace(strings.ReplaceAll(text, "[GOAL_COMPLETE]", ""))
 	}
 	text = strings.TrimSpace(strings.ReplaceAll(text, "[PASS]", ""))
+	// Coworkers already have this; the owner asking again still gets it.
+	if req.Hop > 0 && !sharePattern.MatchString(text) && h.repeats(ctx, req.Room, req.Member, text) {
+		return
+	}
 	flair, role, text := h.takeTags(ctx, req.Room, group, req.Member, text)
 	if flair == "done" && (p.Mode == "continuous" || p.Mode == "goal") {
 		goal = p.Mode == "goal"

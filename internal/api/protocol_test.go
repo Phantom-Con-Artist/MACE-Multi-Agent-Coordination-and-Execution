@@ -178,8 +178,10 @@ func TestHopLimitStopsEndlessHandoffs(t *testing.T) {
 	tm := newTeam(t, "ari", "bo")
 	room := tm.group(t, "ari", "bo")
 	call(t, tm.s, "POST", "/api/v1/chats/"+room.ID+"/policy", Policy{Mode: "reply", Limit: 100}, nil)
-	tm.set("ari", "reply.txt", "@agy-2 over to you for review number")
-	tm.set("bo", "reply.txt", "@agy back to you with notes number")
+	// Short replies whose numbers make each one new, so only the hop limit
+	// can end the chain.
+	tm.set("ari", "reply.txt", "@agy-2 review")
+	tm.set("bo", "reply.txt", "@agy notes")
 	tm.set("ari", "count", "0")
 	tm.set("bo", "count", "0")
 	tm.say(t, room.ID, "@agy start")
