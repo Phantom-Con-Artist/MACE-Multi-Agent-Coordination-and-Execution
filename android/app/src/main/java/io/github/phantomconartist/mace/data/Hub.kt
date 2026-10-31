@@ -336,6 +336,17 @@ class Hub(val origin: String, private val credential: String? = null, private va
         }
     }
 
+    /** A hub file's size in bytes, read from a one-byte range request, or null. */
+    suspend fun fileSize(path: String): Long? = withContext(Dispatchers.IO) {
+        val b = Request.Builder().url(fileUrl(path)).header("Range", "bytes=0-0")
+        credential?.let { b.header("Authorization", "Device $it") }
+        runCatching {
+            http.newCall(b.build()).execute().use { res ->
+                res.header("Content-Range")?.substringAfter('/')?.toLongOrNull() ?: res.header("Content-Length")?.toLongOrNull()?.takeIf { res.code == 200 }
+            }
+        }.getOrNull()
+    }
+
     /** Saves a hub file to target, for opening in another app. */
     suspend fun download(path: String, target: java.io.File) = withContext(Dispatchers.IO) {
         val b = Request.Builder().url(fileUrl(path))

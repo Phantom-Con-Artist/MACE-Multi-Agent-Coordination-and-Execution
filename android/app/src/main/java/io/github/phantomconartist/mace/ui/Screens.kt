@@ -388,7 +388,7 @@ private fun ConversationRow(c: Conversation, media: MediaLoader, selected: Boole
                 Text(
                     if (c.working) "working…" else c.preview,
                     Modifier.weight(1f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    color = if (c.working) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (c.working) mace.online else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (c.unread > 0) {
                     Spacer(Modifier.width(8.dp))

@@ -178,6 +178,7 @@ fun ChatScreen(
     memberOf: (String) -> Member?,
     roleOf: (String) -> String,
     media: MediaLoader,
+    photo: String?,
     observe: Boolean,
     linked: Boolean,
     actions: ChatActions,
@@ -238,9 +239,11 @@ fun ChatScreen(
             if (last != null && last >= list.layoutInfo.totalItemsCount - 3 && state.older && !state.loading) actions.onOlder()
         }
     }
-    // A new message of the owner's own scrolls into view.
+    // The chat opens at the newest message once the hub's page is in.
+    LaunchedEffect(state.id, state.loading) { if (!state.loading) list.scrollToItem(0) }
+    // A new message follows into view when it is the owner's, or when the owner is already at the bottom.
     LaunchedEffect(state.messages.lastOrNull()?.id) {
-        if (state.messages.lastOrNull()?.sender == "you") list.animateScrollToItem(0)
+        if (state.messages.lastOrNull()?.sender == "you" || list.firstVisibleItemIndex <= 1) list.animateScrollToItem(0)
     }
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > 2 } }
 
@@ -261,14 +264,14 @@ fun ChatScreen(
             navigationIcon = { IconButton(onClick = actions.onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
             title = {
                 Row(Modifier.clip(RoundedCornerShape(24.dp)).clickable(onClick = actions.onInfo).padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(state.name, state.id, state.group, 40, agent?.let { media.avatarUrl(it) }, media)
+                    Avatar(state.name, state.id, state.group, 40, photo, media)
                     Spacer(Modifier.width(12.dp))
                     Column {
                         Text(state.name, style = MaterialTheme.typography.titleMedium, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             presence(state, memberOf),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (state.working.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (state.working.isNotEmpty()) mace.online else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -323,8 +326,15 @@ fun ChatScreen(
                 val bubbleMax = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
                 LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(top = 8.dp, bottom = 6.dp)) {
                     // Working agents show what they are doing, below the last message.
-                    state.working.forEach { (member, steps) ->
-                        item(key = "working-$member") { WorkingRow(member, memberOf(member)?.name ?: "Agent", steps, state.group, observe) }
+                    if (observe || state.working.size == 1) {
+                        state.working.forEach { (member, steps) ->
+                            item(key = "working-$member") { WorkingRow(member, memberOf(member)?.name ?: "Agent", steps, state.group, observe) }
+                        }
+                    } else if (state.working.isNotEmpty()) {
+                        // Several agents at once read as one line, as a messenger shows several people typing.
+                        val names = state.working.keys.map { memberOf(it)?.name?.substringBefore(' ') ?: "An agent" }
+                        val who = if (names.size <= 3) names.joinToString(", ") else names.take(2).joinToString(", ") + " and ${names.size - 2} more"
+                        item(key = "working-all") { WorkingRow(state.working.keys.first(), who, emptyList(), true, false, note = "are working") }
                     }
                     for (i in messages.indices.reversed()) {
                         val m = messages[i]
@@ -408,7 +418,8 @@ private fun presence(state: ChatState, memberOf: (String) -> Member?): String {
     state.working.entries.firstOrNull()?.let { (member, steps) ->
         val who = if (state.group) (memberOf(member)?.name ?: "An agent") + " is " else ""
         val doing = steps.lastOrNull { it.state == "running" }?.title ?: steps.lastOrNull()?.title
-        return who + (doing?.let { "working: " + it.replaceFirstChar { c -> c.lowercase() } } ?: "working…")
+        if (state.working.size > 1) return "${state.working.size} agents are working…"
+        return who + (doing?.let { "working: " + plainStep(it).replaceFirstChar { c -> c.lowercase() } } ?: "working…")
     }
     if (state.group) return state.members.joinToString(", ") { it.name }.ifEmpty { "No agents yet" }
     val m = state.members.firstOrNull() ?: return "Offline: its machine is down"
@@ -453,8 +464,8 @@ private fun UnreadMarker(count: Int) {
 
 /** An agent replying: an incoming bubble with its current step and three pulsing dots. */
 @Composable
-private fun WorkingRow(id: String, name: String, steps: List<io.github.phantomconartist.mace.data.Step>, group: Boolean, observe: Boolean) {
-    val step = if (observe) "" else steps.lastOrNull()?.title.orEmpty()
+private fun WorkingRow(id: String, name: String, steps: List<io.github.phantomconartist.mace.data.Step>, group: Boolean, observe: Boolean, note: String = "") {
+    val step = note.ifEmpty { if (observe) "" else steps.lastOrNull()?.title?.let(::plainStep).orEmpty() }
     val pulse = rememberInfiniteTransition(label = "typing")
     Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 48.dp, top = 6.dp, bottom = 2.dp)) {
         Surface(shape = BubbleShape(mine = false, tail = true), color = mace.incoming, contentColor = mace.onIncoming) {
@@ -566,10 +577,10 @@ private fun MessageRow(
                         if (!mine && first && state.group) {
                             Row(Modifier.padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(memberOf(m.sender)?.name ?: m.sender.substringAfter("::"), style = MaterialTheme.typography.labelLarge,
-                                    color = memberColor(m.sender), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                                roleOf(m.sender).takeIf { it.isNotEmpty() }?.let {
+                                    color = memberColor(m.sender), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                shortRole(roleOf(m.sender)).takeIf { it.isNotEmpty() }?.let {
                                     Spacer(Modifier.width(12.dp))
-                                    Text(it, style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(it, style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                                 }
                             }
                         }
@@ -612,7 +623,7 @@ private fun MessageRow(
 private val quoteLine = Regex("""^> ([^:\n]{1,80}): (.*)$""")
 
 @Composable
-private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit) {
+private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit) = Column {
     var text = m.text
     quoteLine.find(text.lineSequence().firstOrNull().orEmpty())?.let { q ->
         text = text.substringAfter('\n', "")
@@ -681,10 +692,19 @@ private fun StepList(steps: List<io.github.phantomconartist.mace.data.Step>, ink
                 )
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text(st.title.ifEmpty { st.kind }, style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.9f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(plainStep(st.title).ifEmpty { st.kind }, style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.9f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (st.detail.isNotBlank()) Text(st.detail.trim(), fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 11.sp, color = ink.copy(alpha = 0.6f), maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
     }
+}
+
+/** A step's title without Markdown backticks, which read as stray accents in italics. */
+private fun plainStep(title: String) = title.replace("`", "").trim()
+
+/** The first phrase of a role, short enough to sit beside a name, as a messenger shows a number. */
+fun shortRole(role: String): String {
+    val first = role.trim().substringBefore('.').substringBefore(',').substringBefore(':').trim()
+    return if (first.length <= 32) first else first.take(30).trimEnd() + "…"
 }

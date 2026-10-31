@@ -252,7 +252,7 @@ private fun MemberRow(id: String, a: Member?, model: AppModel, isLead: Boolean, 
             Column(Modifier.weight(1f)) {
                 Text(a?.name ?: "Agent not reachable", fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (a == null) Text("Removed, or on a machine that is offline", fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                else Text(role.ifEmpty { "Add a role" }, fontSize = 15.sp, color = if (role.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                else Text(shortRole(role).ifEmpty { "Add a role" }, fontSize = 15.sp, color = if (role.isEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (isLead) {

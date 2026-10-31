@@ -160,6 +160,7 @@ class MainActivity : FragmentActivity() {
                             memberOf = model::memberOf,
                             roleOf = { model.roleOf(c.id, it) },
                             media = model.media,
+                            photo = model.photoOf(c.id),
                             observe = observe,
                             linked = linked,
                             actions = ChatActions(

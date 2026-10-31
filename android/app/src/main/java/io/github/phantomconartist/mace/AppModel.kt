@@ -696,7 +696,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             when (io.github.phantomconartist.mace.ui.kindOf(m.file)) {
                 io.github.phantomconartist.mace.ui.FileKind.Image -> "📷 Photo"
                 io.github.phantomconartist.mace.ui.FileKind.Video -> "🎥 Video"
-                else -> if (m.file.isNotEmpty()) "📄 " + m.file.trimEnd('/').substringAfterLast('/') else ""
+                else -> if (m.file.isNotEmpty()) "📄 " + io.github.phantomconartist.mace.ui.fileName(m.file) else ""
             }
         }
         val line = body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()

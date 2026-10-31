@@ -76,6 +76,10 @@ fun kindOf(path: String): FileKind {
     }
 }
 
+/** A shared file's name as people named it, without the hub's hash or upload time prefix. */
+fun fileName(path: String): String =
+    path.trimEnd('/').substringAfterLast('/').replace(Regex("""^([0-9a-f]{8}-|\d{8}-\d{6}-)"""), "")
+
 class MediaLoader(private val hub: () -> Hub) {
     private val cache = object : LruCache<String, Bitmap>(48 shl 20) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
@@ -88,6 +92,15 @@ class MediaLoader(private val hub: () -> Hub) {
     fun groupPhotoUrl(id: String, photo: Long): String? = if (photo > 0) hub().photoPath(id, true) + "?v=$photo" else null
 
     fun fileUrl(path: String) = hub().fileUrl(path)
+
+    private val sizes = mutableMapOf<String, Long?>()
+    private val durations = mutableMapOf<String, Long>()
+
+    /** A video's length in milliseconds, known once its first frame was read. */
+    fun duration(path: String): Long? = durations[path]
+
+    /** A shared file's size, asked of the hub once. */
+    suspend fun size(path: String): Long? = sizes.getOrPut(path) { hub().fileSize(path) }
 
     fun cached(key: String): ImageBitmap? = cache.get(key)?.asImageBitmap()
 
@@ -112,6 +125,7 @@ class MediaLoader(private val hub: () -> Hub) {
             runCatching {
                 MediaMetadataRetriever().use { r ->
                     r.setDataSource(hub().fileUrl(path), hub().headers())
+                    r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.let { durations[path] = it }
                     r.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, maxPx, maxPx)
                 }
             }.getOrNull()
@@ -155,7 +169,7 @@ fun Avatar(name: String, id: String, group: Boolean, size: Int, photo: String?, 
 /** A shared file inside a bubble: pictures and videos as previews, other files as a card. */
 @Composable
 fun FileCard(path: String, ink: Color, width: Dp, media: MediaLoader, onOpen: (String) -> Unit) {
-    val name = path.trimEnd('/').substringAfterLast('/')
+    val name = fileName(path)
     when (kindOf(path)) {
         FileKind.Image, FileKind.Video -> {
             val video = kindOf(path) == FileKind.Video
@@ -172,8 +186,15 @@ fun FileCard(path: String, ink: Color, width: Dp, media: MediaLoader, onOpen: (S
                 contentAlignment = Alignment.Center,
             ) {
                 img?.let { Image(it, name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                    ?: Icon(if (video) Icons.Rounded.Videocam else Icons.Rounded.Image, null, tint = ink.copy(alpha = if (tried) 0.5f else 0.25f), modifier = Modifier.size(40.dp))
-                if (video) {
+                    ?: if (!tried) androidx.compose.material3.CircularProgressIndicator(Modifier.size(36.dp), color = ink.copy(alpha = 0.6f), strokeWidth = 3.dp) else Icon(if (video) Icons.Rounded.Videocam else Icons.Rounded.Image, null, tint = ink.copy(alpha = if (tried) 0.5f else 0.25f), modifier = Modifier.size(40.dp))
+                if (video && img != null) media.duration(path)?.let { ms ->
+                    Row(Modifier.align(Alignment.BottomStart).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Videocam, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("%d:%02d".format(ms / 60000, (ms / 1000) % 60), fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                    }
+                }
+                if (video && img != null) {
                     Box(Modifier.size(56.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(36.dp))
                     }
@@ -182,27 +203,41 @@ fun FileCard(path: String, ink: Color, width: Dp, media: MediaLoader, onOpen: (S
             Spacer(Modifier.height(2.dp))
         }
         else -> {
+            // A document, as a messenger shows one: an inset card with the type,
+            // the name on up to two lines, and its size; the time sits below.
             val kind = kindOf(path)
+            val ext = name.substringAfterLast('.', "").uppercase().take(5)
+            var size by remember(path) { mutableStateOf<Long?>(null) }
+            LaunchedEffect(path) { if (kind != FileKind.Folder) size = media.size(path) }
             Row(
-                Modifier.padding(bottom = 4.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f)).clickable { onOpen(path) }
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                Modifier.width(width - 20.dp).padding(bottom = 2.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.16f))
+                    .clickable { onOpen(path) }.padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    when (kind) { FileKind.Folder -> Icons.Rounded.Folder; FileKind.Pdf -> Icons.Rounded.PictureAsPdf; else -> Icons.Rounded.InsertDriveFile },
-                    null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.widthIn(max = width - 90.dp)) {
-                    Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (kind == FileKind.Pdf || kind == FileKind.Other) {
+                    Box(Modifier.size(width = 30.dp, height = 36.dp).clip(RoundedCornerShape(4.dp)).background(if (kind == FileKind.Pdf) Color(0xFFE53935) else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                        contentAlignment = Alignment.Center) {
+                        Text(if (kind == FileKind.Pdf) "PDF" else ext.ifEmpty { "FILE" }.take(4), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
+                    }
+                } else Icon(Icons.Rounded.Folder, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
-                        when (kind) { FileKind.Folder -> "Folder"; FileKind.Pdf -> "PDF"; else -> name.substringAfterLast('.', "").uppercase().ifEmpty { "File" } },
-                        fontSize = 12.sp, color = ink.copy(alpha = 0.65f),
+                        listOfNotNull(size?.let(::humanSize), if (kind == FileKind.Folder) "Folder" else ext.ifEmpty { "File" }).joinToString(" · "),
+                        fontSize = 13.sp, color = ink.copy(alpha = 0.65f),
                     )
                 }
             }
         }
     }
+}
+
+/** Bytes in a few characters: 517 kB, 2.4 MB. */
+fun humanSize(bytes: Long): String = when {
+    bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
+    bytes >= 1_000 -> "${bytes / 1_000} kB"
+    else -> "$bytes B"
 }
 
 /** Message sounds: a pop when a message leaves, a chime when one arrives. Silent when the phone is. */
