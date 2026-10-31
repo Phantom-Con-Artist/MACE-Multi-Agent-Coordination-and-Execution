@@ -8,5 +8,5 @@
 - Preserve direct chat, local and remote groups, goal/reply/continuous modes, pause, stop, terminate, resume, removal, file inspection, desktop app launch, host connections, and activity logs.
 - Take inspiration from familiar messengers without copying WhatsApp's branding, wallpaper, or visual treatment.
 - Use shadcn components, Lucide utility icons, self-hosted typography, geometric artwork, rounded controls, and solid colors. Keep native scrolling, mobile layouts, keyboard focus, and truthful empty/error states.
-- Art prompts and references are recorded in docs/ART-DIRECTION.md. Do not replace generated artwork with generic decorative placeholders.
+- The official logo and visual direction are recorded in docs/ART-DIRECTION.md. Artwork is original geometric and non-Euclidean vector art built from the logo; do not use raster pictures or generic decorative placeholders.
 - Live provider accounts, real GUI launches, and real Tailnet enrollment must not be reported as verified by diagnostic fixtures or two localhost daemons.

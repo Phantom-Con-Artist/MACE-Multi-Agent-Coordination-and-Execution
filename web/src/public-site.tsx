@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
-  ArrowDown,
   Copy,
   Check,
   Menu,
@@ -10,11 +9,6 @@ import {
   Moon,
   ArrowUpRight,
   Terminal,
-  MessageCircle,
-  Folder,
-  Monitor,
-  BookOpen,
-  LifeBuoy,
   Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,9 +18,12 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import "./public-site.css";
+import "./landing.css";
+import Landing from "./landing";
+import { MaceLogo, MaceMark } from "./brand";
+import { HyperbolicDisk, StepArt } from "./art";
 
 const sections = [
   ["home", "Home"],
@@ -34,29 +31,6 @@ const sections = [
   ["docs", "Docs"],
   ["troubleshoot", "Troubleshoot"],
   ["about", "About"],
-];
-const steps = [
-  {
-    title: "Start your host.",
-    detail:
-      "On the computer you want to work with, run one command. Mace prints your address, access token, and a sign-in link.",
-    command: "mace start",
-    action: "Keep this computer running while you work remotely.",
-  },
-  {
-    title: "Open the link.",
-    detail:
-      "Open the printed sign-in link in your browser. On another device, use the printed network address. The link connects you automatically.",
-    command: "Open your sign-in link",
-    action: "Your phone or laptop needs a network route to the host.",
-  },
-  {
-    title: "Choose your agent.",
-    detail:
-      "Tap + in Chats and choose an installed agent. Start in root, or pick a folder. Tell it what you would like done.",
-    command: "Chats → + → Choose an agent",
-    action: "No launch arguments or configuration form to fill out.",
-  },
 ];
 const guide = [
   [
@@ -69,19 +43,19 @@ const guide = [
   ],
   [
     "Put agents in a group",
-    "Use New group, give it a name, and choose agents. Agents take turns with the shared conversation context. Local agents use the same host filesystem, so a path is enough to share a file. You can add or remove members from Conversation controls.",
+    "Tap +, choose New group, name it, and pick agents. When you write without mentioning anyone, every agent answers in parallel. Write @handle to address one agent; agents mention each other the same way. Each agent keeps one memory across its private chat and its groups. Add or remove members from the conversation menu.",
   ],
   [
     "Set a stopping point",
-    "Reply limit sets the total number of agent replies. Goal oriented mode asks agents to work toward your goal, then stops on their completion report or the reply limit. Continuous mode runs until paused or a reply fails. A completion report is a claim to review, not a guarantee.",
+    "Reply limit caps how many replies agents give to each of your messages. Goal oriented mode asks agents to work toward your goal, then stops on their completion report or the limit. Continuous mode keeps the team talking until you pause, a reply fails, or everyone passes. A completion report is a claim to review, not a guarantee.",
   ],
   [
     "Pause, stop, or remove an agent",
-    "Pause stops the current conversation run. Stop cancels an agent’s current work. Terminate makes the agent unavailable until resumed. Remove takes it out of your chat list and groups while preserving history. These controls are inside the conversation menu and on the Host page.",
+    "Pause, in the conversation header while agents work, stops that conversation. Pause everything stops every agent on every connected computer. Stop cancels one agent's work. Terminate makes it unavailable until resumed. Remove takes it out of your chats and groups while keeping history. You can write at any time, even while agents work.",
   ],
   [
     "Open files and apps",
-    "Host files lets you browse folders, read text, preview pictures, and play supported audio or video. Open an app launches an installed application on the host desktop. Mace does not stream its window into your browser. You can inspect launch results and process output in Activity.",
+    "Host files lets you browse folders, read text, preview pictures, and play supported audio or video. When an agent links a file in its reply, tap it to open it. Open an app launches an installed application on the host desktop; its window is not yet streamed to your browser. Activity shows launch results and process output.",
   ],
   [
     "Connect another Mace host",
@@ -115,27 +89,9 @@ const issues = [
   ],
   [
     "A conversation keeps going",
-    "Use Pause in the conversation header. Continuous mode deliberately runs until paused or a reply fails. For a bounded task choose Reply limit or Goal oriented mode before sending your next message.",
+    "Use Pause in the conversation header, or Pause everything in the banner. Continuous mode runs until paused. Outside continuous mode, a chain of agents handing work to each other stops after eight hand-offs, and agents that repeat each other are paused automatically.",
   ],
 ];
-function Art({ step = 0 }: { step?: number }) {
-  return (
-    <div className="setup-art">
-      <img
-        src="/art/mace-setup.png"
-        style={{ transform: `translateX(-${(step * 100) / 3}%)` }}
-        alt={
-          [
-            "Illustration of starting a host computer",
-            "Illustration of a phone connecting to a laptop",
-            "Illustration of three geometric agents talking",
-          ][step]
-        }
-        loading="lazy"
-      />
-    </div>
-  );
-}
 function CopyCommand() {
   const [copied, setCopied] = useState(false),
     [failed, setFailed] = useState(false);
@@ -190,9 +146,8 @@ export default function PublicSite({
   return (
     <div className="public-site" ref={scroll}>
       <header className="site-header">
-        <a className="site-brand" href="#home">
-          <img src="/mace-mark.svg" alt="" />
-          <span>MACE</span>
+        <a className="site-brand" href="#home" aria-label="MACE home">
+          <MaceLogo assemble title="MACE" />
         </a>
         <nav
           aria-label="Website navigation"
@@ -245,276 +200,7 @@ export default function PublicSite({
         </div>
       </header>
       {page === "home" ? (
-        <>
-          <main className="landing">
-            <section className="site-hero">
-              <div className="hero-copy">
-                <span className="product-longname">
-                  Multi Agent Coordination and Execution
-                </span>
-                <h1>
-                  Your computer.
-                  <br />A little closer.
-                </h1>
-                <p>
-                  Chat with your agents, open your files, and get things done on
-                  your own computer. From the screen in front of you.
-                </p>
-                <div className="hero-actions">
-                  <Button size="lg" onClick={() => go("messenger")}>
-                    Open workspace <ArrowUpRight size={19} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      document
-                        .getElementById("getting-started")
-                        ?.scrollIntoView({
-                          behavior: matchMedia(
-                            "(prefers-reduced-motion: reduce)",
-                          ).matches
-                            ? "auto"
-                            : "smooth",
-                        })
-                    }
-                  >
-                    See how it works <ArrowDown size={16} />
-                  </Button>
-                </div>
-                <div className="hero-command">
-                  <span>Start on your host with</span>
-                  <CopyCommand />
-                </div>
-              </div>
-              <figure className="hero-art">
-                <img
-                  src="/art/mace-workspace.png"
-                  alt="A geometric desktop computer and phone connected through a folded arch, with three agent shapes"
-                  fetchPriority="high"
-                  width="1536"
-                  height="1024"
-                />
-                <figcaption>
-                  <span className="art-label">Your computer stays home.</span>
-                  <span className="art-label">Your work comes with you.</span>
-                </figcaption>
-              </figure>
-            </section>
-            <div className="compatibility">
-              <span>Bring the agents you already use</span>
-              <div>
-                <strong>Codex</strong>
-                <strong>Claude Code</strong>
-                <strong>Antigravity</strong>
-                <strong>Muse</strong>
-              </div>
-              <span>Runs on your host. Opens in your browser.</span>
-            </div>
-            <section className="getting-started" id="getting-started">
-              <div className="section-title">
-                <div>
-                  <span className="section-index">01 / GETTING STARTED</span>
-                  <h2>
-                    Three small steps.
-                    <br />
-                    Then just chat.
-                  </h2>
-                </div>
-                <p>
-                  No launch forms to learn.
-                  <br />
-                  No terminal flags to remember.
-                </p>
-              </div>
-              <Tabs defaultValue="0" className="setup-tabs">
-                <TabsList className="setup-step-nav">
-                  {steps.map((s, i) => (
-                    <TabsTrigger key={i} value={String(i)}>
-                      <span>{String(i + 1).padStart(2, "0")}</span>
-                      {s.title}
-                      <ArrowRight size={17} />
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {steps.map((s, i) => (
-                  <TabsContent
-                    key={i}
-                    value={String(i)}
-                    className="setup-content"
-                  >
-                    <Art step={i} />
-                    <div className="setup-description">
-                      <span className="small-caps">STEP {i + 1} OF 3</span>
-                      <h3>{s.title}</h3>
-                      <p>{s.detail}</p>
-                      {i === 0 ? (
-                        <CopyCommand />
-                      ) : (
-                        <div className="step-instruction">
-                          {s.command}
-                          <ArrowUpRight size={18} />
-                        </div>
-                      )}
-                      <small>{s.action}</small>
-                    </div>
-                  </TabsContent>
-                ))}
-              </Tabs>
-            </section>
-            <section className="work-section">
-              <div className="section-title">
-                <div>
-                  <span className="section-index">02 / YOUR WORKSPACE</span>
-                  <h2>
-                    A familiar place
-                    <br />
-                    to ask for a hand.
-                  </h2>
-                </div>
-                <p>
-                  Start with a conversation.
-                  <br />
-                  The controls are there when you need them.
-                </p>
-              </div>
-              <div className="work-story">
-                <div className="story-shape">
-                  <div className="geometric-agent">
-                    <div />
-                    <div />
-                    <div />
-                  </div>
-                  <span>ONE AGENT OR A SMALL TEAM</span>
-                </div>
-                <div className="work-explanations">
-                  <article>
-                    <MessageCircle size={23} />
-                    <div>
-                      <h3>Talk to your agents.</h3>
-                      <p>
-                        Choose an installed CLI and start a conversation. Bring
-                        others into a group, give them a goal, or set a reply
-                        limit.
-                      </p>
-                    </div>
-                  </article>
-                  <article>
-                    <Folder size={23} />
-                    <div>
-                      <h3>Reach your files and apps.</h3>
-                      <p>
-                        Browse folders, inspect documents, play media, or open
-                        an app on your host. Start an agent in the folder you
-                        are looking at.
-                      </p>
-                    </div>
-                  </article>
-                  <article>
-                    <ActivityIcon />
-                    <div>
-                      <h3>See what happened.</h3>
-                      <p>
-                        Follow the conversation, inspect process logs, and track
-                        file transfers. Pause work or stop an agent at any
-                        point.
-                      </p>
-                    </div>
-                  </article>
-                </div>
-              </div>
-            </section>
-            <section className="two-host-story">
-              <div>
-                <span className="section-index">
-                  03 / ROOM TO WORK TOGETHER
-                </span>
-                <h2>
-                  Another computer.
-                  <br />
-                  The same conversation.
-                </h2>
-                <p>
-                  Connect a second Mace host and bring its agents into your
-                  groups. Local agents use shared paths. Files sent to another
-                  host travel through Mace.
-                </p>
-                <Button variant="outline" onClick={() => go("manual")}>
-                  How connected hosts work <ArrowRight size={17} />
-                </Button>
-              </div>
-              <div
-                className="host-pair"
-                aria-label="Illustration of two connected computers"
-              >
-                <div>
-                  <Monitor size={56} strokeWidth={1.5} />
-                  <span>Your host</span>
-                </div>
-                <span className="host-connection" />
-                <div>
-                  <Monitor size={56} strokeWidth={1.5} />
-                  <span>Another host</span>
-                </div>
-                <div className="shared-file">
-                  <Folder size={21} />A file, shared deliberately.
-                </div>
-              </div>
-            </section>
-            <section className="site-help">
-              <div>
-                <LifeBuoy size={28} />
-                <h2>
-                  A little help,
-                  <br />
-                  when you need it.
-                </h2>
-                <p>
-                  Short instructions, clear answers, and the details when you
-                  want them.
-                </p>
-              </div>
-              <div className="help-links">
-                {[
-                  [
-                    "manual",
-                    "The manual",
-                    "Your first chat, groups, files, and host controls.",
-                  ],
-                  [
-                    "troubleshoot",
-                    "Something not working?",
-                    "Connection, agent, app, and playback answers.",
-                  ],
-                  [
-                    "docs",
-                    "Under the surface",
-                    "Configuration and protocol reference.",
-                  ],
-                ].map(([id, title, desc]) => (
-                  <button key={id} onClick={() => go(id)}>
-                    <span>
-                      <strong>{title}</strong>
-                      <small>{desc}</small>
-                    </span>
-                    <ArrowUpRight size={22} />
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="last-call">
-              <img src="/mace-mark.svg" alt="" />
-              <h2>
-                Pick an agent.
-                <br />
-                Tell it what needs doing.
-              </h2>
-              <Button size="lg" onClick={() => go("messenger")}>
-                Open workspace <ArrowUpRight size={19} />
-              </Button>
-            </section>
-          </main>
-        </>
-      ) : (
+        <Landing go={go} />      ) : (
         <main className="knowledge">
           <div className="knowledge-heading">
             <span className="section-index">
@@ -551,7 +237,7 @@ export default function PublicSite({
           {page === "manual" ? (
             <>
               <div className="manual-start">
-                <Art />
+                <StepArt step={0} />
                 <div>
                   <h2>Start here.</h2>
                   <p>
@@ -638,10 +324,7 @@ export default function PublicSite({
           ) : (
             <>
               <div className="about-illustration">
-                <img
-                  src="/art/mace-workspace.png"
-                  alt="Geometric host and phone connected by a cable"
-                />
+                <HyperbolicDisk label="A hyperbolic tiling of red and black triangles" />
               </div>
               <div className="about-copy">
                 <h2>Work on the machine you already have.</h2>
@@ -696,7 +379,7 @@ export default function PublicSite({
       <footer className="site-footer">
         <div className="footer-brand">
           <a href="#home">
-            <img src="/mace-mark.svg" alt="" />
+            <MaceMark title="" className="footer-mark" />
             MACE
           </a>
           <p>Multi Agent Coordination and Execution</p>
@@ -715,9 +398,6 @@ export default function PublicSite({
       </footer>
     </div>
   );
-}
-function ActivityIcon() {
-  return <BookOpen size={23} />;
 }
 function Docs() {
   return (
