@@ -1,5 +1,7 @@
 # Mace product constraints
 
+These rules cover the hub (server/) and the desktop web app (web/). MACE for Android (android/) has its own design: native Material 3 with dynamic color, Material icons, and the system font, informed by the messenger research; the web rules below on palette, icons, typography, shadcn, and artwork do not apply to it.
+
 - Product name: MACE, Multi Agent Coordination and Execution. Current requested version: 0.1.0.
 - Do not use em dashes in product copy, documentation, or user-facing messages.
 - The landing page, Manual, Docs, Troubleshoot, and About must remain explorable without signing in. The workspace requires host authentication.

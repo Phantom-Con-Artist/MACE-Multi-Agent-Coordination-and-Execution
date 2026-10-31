@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Compose draws everything; this only sets the window before it does. -->
-    <style name="Theme.Mace" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/chat</item>
+    <!-- Compose draws the app; this only themes the window before it does. -->
+    <style name="Theme.Mace" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
     </style>
 </resources>

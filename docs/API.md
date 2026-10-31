@@ -103,6 +103,7 @@ A conversation is a direct chat (its ID is the agent's ID) or a group (`Room`).
 | `cursor` | an agent read up to a `seq` |
 | `records` | another machine's messages arrived for a conversation |
 | `metrics` | a new metrics sample |
+| `reset` | the hub cannot replay what was missed (it restarted, or the gap is too long); refetch everything |
 
 Clients ignore events they do not know. An open app sends `POST /api/v1/presence` with `{"device": "<a stable ID for this install>"}` every 5 seconds while it is in the foreground; a device without one for `timeout_seconds` counts as gone. The answer is `{"guard", "grace_seconds", "timeout_seconds", "stopped_at"}`: when the guard is on, work stops once every device has been gone for the grace period. `GET|POST /api/v1/settings/presence` reads or sets `{"keep_working": true|false}`, which turns the guard off or on. `POST /api/v1/presence/leave` with the same body says the app closed.
 
