@@ -39,6 +39,10 @@ import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.InsertDriveFile
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.DropdownMenu
@@ -137,11 +141,52 @@ fun ChatScreen(
     onRetry: (Message) -> Unit,
     onOlder: () -> Unit,
     onInserted: () -> Unit,
+    onCommand: (String, String) -> Unit,
+    onPause: (Boolean) -> Unit,
+    onControl: (String, String) -> Unit,
+    files: suspend (String) -> List<io.github.phantomconartist.mace.data.Entry>,
+    models: suspend (String) -> io.github.phantomconartist.mace.data.Models,
+    onSendFile: (String, String) -> Unit,
 ) {
     var quote by remember(state.id) { mutableStateOf<Quote?>(null) }
+    var attachment by rememberSaveable(state.id) { mutableStateOf("") }
+    var picker by remember { mutableStateOf<String?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    var confirmNew by remember { mutableStateOf(false) }
+    val agent = if (state.group) null else state.members.firstOrNull()
+    var modelList by remember(state.id) { mutableStateOf<io.github.phantomconartist.mace.data.Models?>(null) }
+    var folderList by remember(state.id) { mutableStateOf<Pair<String, List<String>>?>(null) }
     var draft by rememberSaveable(state.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    // Models and folders load when the draft asks for them.
+    val wantsModels = agent != null && draft.text.startsWith("/model ")
+    LaunchedEffect(wantsModels) { if (wantsModels && modelList == null) modelList = runCatching { models(agent!!.id) }.getOrNull() }
+    val cd = if (agent != null) Regex("""^/cd\s+(.*)$""").find(draft.text)?.groupValues?.get(1) else null
+    val cdDir = cd?.let { cdTarget(it, agent!!.folder).first }
+    LaunchedEffect(cdDir) {
+        if (cdDir != null && folderList?.first != cdDir) {
+            folderList = cdDir to runCatching { files(cdDir.trim('/').ifEmpty { "." }) }.getOrDefault(emptyList()).filter { it.directory && !it.name.startsWith(".") }.map { it.name }.sorted()
+        }
+    }
+    val suggestions = when {
+        state.group -> mentionSuggestions(draft, state.members)
+        agent != null && draft.text.startsWith("/") -> commandSuggestions(draft.text, modelList, folderList, agent.folder)
+        else -> emptyList()
+    }
+
+    fun runCommand(text: String): Boolean {
+        if (agent == null) return false
+        val (name, arg) = parseCommand(text) ?: return false
+        when (name) {
+            "files" -> picker = agent.folder
+            "new" -> confirmNew = true
+            else -> onCommand(name, arg)
+        }
+        draft = TextFieldValue("")
+        return true
+    }
 
     LaunchedEffect(state.insert) {
         state.insert?.let { text ->
@@ -173,7 +218,7 @@ fun ChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLowest)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         TopAppBar(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
             title = {
@@ -192,8 +237,28 @@ fun ChatScreen(
                     }
                 }
             },
+            actions = {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "Conversation controls") }
+                DropdownMenu(menu, { menu = false }) {
+                    if (state.run == "paused") DropdownMenuItem({ Text("Continue") }, leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) }, onClick = { menu = false; onPause(false) })
+                    else DropdownMenuItem({ Text("Pause this conversation") }, leadingIcon = { Icon(Icons.Rounded.Pause, null) }, onClick = { menu = false; onPause(true) })
+                    agent?.let { a ->
+                        if (a.status == "stopped" || a.status == "terminated") {
+                            DropdownMenuItem({ Text("Resume agent") }, leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) }, onClick = { menu = false; onControl(a.id, "resume") })
+                        } else {
+                            DropdownMenuItem({ Text("Stop agent") }, leadingIcon = { Icon(Icons.Rounded.Stop, null) }, onClick = { menu = false; onControl(a.id, "stop") })
+                        }
+                        DropdownMenuItem({ Text("Browse files") }, leadingIcon = { Icon(Icons.Rounded.Folder, null) }, onClick = { menu = false; picker = a.folder })
+                    }
+                }
+            },
         )
         if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (state.run == "paused") {
+            Text("Paused. Write to give new direction, or continue from the menu.", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 16.dp, vertical = 6.dp))
+        }
 
         val messages = state.messages
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, reverseLayout = true, contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)) {
@@ -225,16 +290,38 @@ fun ChatScreen(
         Composer(
             draft = draft,
             quote = quote,
+            attachment = attachment,
+            suggestions = suggestions,
             onDraft = { draft = it },
+            onPick = { o ->
+                draft = draft.withText(o.text)
+                if (o.run) runCommand(o.text)
+            },
             onClearQuote = { quote = null },
-            onSend = {
+            onAttach = { picker = agent?.folder ?: "." },
+            onClearAttachment = { attachment = "" },
+            onSend = send@{
+                if (attachment.isEmpty() && quote == null && runCommand(draft.text)) return@send
                 val q = quote
                 val text = if (q != null) "> ${q.name}: ${q.text}\n${draft.text}" else draft.text
-                onSend(text)
+                if (attachment.isNotEmpty()) onSendFile(text, attachment) else onSend(text)
                 draft = TextFieldValue("")
                 quote = null
+                attachment = ""
                 scope.launch { list.animateScrollToItem(0) }
             },
+        )
+    }
+    picker?.let { start ->
+        FilePicker(start, files, onPick = { attachment = it; picker = null }, onDismiss = { picker = null })
+    }
+    if (confirmNew) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmNew = false },
+            title = { Text("Start a fresh session?") },
+            text = { Text("The agent forgets this conversation's native memory. The messages stay here.") },
+            confirmButton = { androidx.compose.material3.TextButton({ confirmNew = false; onCommand("new", "") }) { Text("Start fresh") } },
+            dismissButton = { androidx.compose.material3.TextButton({ confirmNew = false }) { Text("Cancel") } },
         )
     }
 }
@@ -272,6 +359,16 @@ private fun DayChip(text: String) {
     }
 }
 
+/** A longer note from MACE, such as a command's answer, kept readable as lines. */
+@Composable
+private fun NoteCard(text: String) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 6.dp)) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(text.trim(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(14.dp))
+        }
+    }
+}
+
 @Composable
 private fun NewDivider() {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -298,7 +395,7 @@ private fun WorkingRow(name: String, step: String, group: Boolean) {
 @Composable
 private fun MessageRow(m: Message, first: Boolean, state: ChatState, memberOf: (String) -> Member?, onRetry: (Message) -> Unit, onReply: () -> Unit) {
     if (m.sender == "mace" || m.kind == "system") {
-        DayChip(m.text)
+        if ('\n' in m.text.trim()) NoteCard(m.text) else DayChip(m.text)
         return
     }
     val mine = m.sender == "you"
@@ -364,10 +461,10 @@ private fun MessageRow(m: Message, first: Boolean, state: ChatState, memberOf: (
                         Body(m)
                         Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                             if (m.activity.isNotEmpty()) {
-                                Text("${m.activity.size} steps · ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${m.activity.size} steps · ", style = MaterialTheme.typography.labelSmall, color = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.7f))
                             }
                             Text(local(m.at)?.format(timeFormat).orEmpty(), style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f))
+                                color = androidx.compose.material3.LocalContentColor.current.copy(alpha = 0.7f))
                             if (mine) {
                                 Spacer(Modifier.width(4.dp))
                                 Ticks(m, state)
@@ -410,51 +507,14 @@ private fun Body(m: Message) {
 @Composable
 private fun Ticks(m: Message, state: ChatState) {
     val size = Modifier.size(16.dp)
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // Inside the owner's bubble: the bubble's own text color, faded; read stands out in full.
+    val ink = androidx.compose.material3.LocalContentColor.current
+    val muted = ink.copy(alpha = 0.6f)
     when {
         m.kind == "failed" -> Icon(Icons.Rounded.ErrorOutline, "Not sent", modifier = size, tint = MaterialTheme.colorScheme.error)
         m.seq == 0L -> Icon(Icons.Rounded.Schedule, "Sending", modifier = size, tint = muted)
-        state.receipts.values.any { it >= m.seq } -> Icon(Icons.Rounded.DoneAll, "Read", modifier = size, tint = MaterialTheme.colorScheme.primary)
+        state.receipts.values.any { it >= m.seq } -> Icon(Icons.Rounded.DoneAll, "Read", modifier = size, tint = MaterialTheme.colorScheme.tertiary)
         m.delivery.values.any { it == "delivered" } -> Icon(Icons.Rounded.DoneAll, "Delivered", modifier = size, tint = muted)
         else -> Icon(Icons.Rounded.Done, "Sent", modifier = size, tint = muted)
-    }
-}
-
-@Composable
-private fun Composer(draft: TextFieldValue, quote: Quote?, onDraft: (TextFieldValue) -> Unit, onClearQuote: () -> Unit, onSend: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer).navigationBarsPadding().imePadding()) {
-        AnimatedVisibility(quote != null) {
-            quote?.let { q ->
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(3.dp).heightIn(min = 36.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
-                    Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                        Text(q.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                        Text(q.text, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = onClearQuote) { Icon(Icons.Rounded.Close, "Cancel reply") }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
-            TextField(
-                value = draft,
-                onValueChange = onDraft,
-                placeholder = { Text("Message") },
-                maxLines = 6,
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            )
-            AnimatedVisibility(draft.text.isNotBlank(), enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) {
-                FilledIconButton(onClick = onSend, modifier = Modifier.padding(start = 8.dp).size(52.dp)) {
-                    Icon(Icons.AutoMirrored.Rounded.Send, "Send")
-                }
-            }
-        }
     }
 }

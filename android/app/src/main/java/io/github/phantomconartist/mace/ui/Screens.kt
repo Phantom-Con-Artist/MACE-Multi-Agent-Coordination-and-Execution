@@ -75,11 +75,11 @@ fun SignInScreen(state: Screen.SignIn, onSignIn: (String) -> Unit) {
             Image(painterResource(R.drawable.ic_launcher_foreground), contentDescription = null, modifier = Modifier.size(88.dp))
             Text("Connect to your hub", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
             Text(
-                "On your computer, open MACE, then Settings, Phone, and copy the sign-in link. Paste it here. It works once and lasts ten minutes.",
+                "Enter your hub's Tailscale address. Your own devices on Tailscale sign in directly. On another account, paste the sign-in link from MACE on your computer, under Settings, Phone.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(link, { link = it }, label = { Text("Sign-in link") }, singleLine = true, enabled = !state.busy, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(link, { link = it }, label = { Text("Hub address or sign-in link") }, singleLine = true, enabled = !state.busy, modifier = Modifier.fillMaxWidth())
             state.problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
             Button({ onSignIn(link) }, enabled = link.isNotBlank() && !state.busy, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text(if (state.busy) "Signing in…" else "Sign in")

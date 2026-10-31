@@ -29,7 +29,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /** An agent, on this hub or on one of the owner's other machines. */
-data class Member(val id: String, val name: String, val handle: String, val provider: String, val status: String, val machine: String?)
+data class Member(val id: String, val name: String, val handle: String, val provider: String, val status: String, val machine: String?, val folder: String = "", val model: String = "")
 
 /** One row of the chat list. */
 data class Conversation(
@@ -71,6 +71,8 @@ data class ChatState(
     val problem: String? = null,
     /** Text to put in the composer, such as an @handle from a swipe. */
     val insert: String? = null,
+    /** The conversation's work: running, paused, completed, … */
+    val run: String = "",
 )
 
 class AppModel(app: Application) : AndroidViewModel(app) {
@@ -112,7 +114,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun signIn(text: String) {
         val link = SignInLink.parse(text)
         if (link == null) {
-            _screen.value = Screen.SignIn(problem = "That is not a MACE sign-in link. It looks like https://your-hub/#connect-once=…")
+            _screen.value = Screen.SignIn(problem = "Enter your hub's address, such as your-pc.your-tailnet.ts.net, or paste a sign-in link.")
             return
         }
         _screen.value = Screen.SignIn(busy = true)
@@ -151,8 +153,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         _screen.value = current.copy(loading = true, problem = null)
         viewModelScope.launch {
             try {
-                loadDirectory()
+                loadDirectory(remote = false)
                 loadInbox()
+                // Agents on other machines fill in afterwards; an offline
+                // machine must not hold up the list.
+                launch { runCatching { loadDirectory(remote = true); loadInbox() } }
             } catch (e: HubException) {
                 if (e.status == 401) signOut("This phone was signed out of the hub. Sign in again.") else
                     _screen.update { (it as? Screen.Home)?.copy(loading = false, problem = explain(e)) ?: it }
@@ -162,24 +167,27 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private suspend fun loadDirectory() {
+    private suspend fun loadDirectory(remote: Boolean = true) {
         val hub = hub()
-        val found = mutableMapOf<String, Member>()
-        hub.agents().forEach { found[it.id] = Member(it.id, it.name, it.handle, it.provider, it.status, null) }
+        val found = members.filterValues { it.machine != null }.toMutableMap()
+        hub.agents().filter { it.status != "removed" }.forEach { found[it.id] = Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model) }
         // Agents on other machines carry the machine's ID before "::".
-        viewModelScope.run {
+        if (remote) viewModelScope.run {
             hub.peers().map { p ->
-                async { runCatching { hub.peerAgents(p.id) }.getOrDefault(emptyList()).map { a -> Member(a.id, a.name, a.handle, a.provider, a.status, p.name) } }
+                async { runCatching { hub.peerAgents(p.id) }.getOrDefault(emptyList()).filter { it.status != "removed" }.map { a -> Member(a.id, a.name, a.handle, a.provider, a.status, p.name, a.folder, a.model) } }
             }.awaitAll().flatten().forEach { found[it.id] = it }
         }
         members = found
-        _agents.value = found.values.filter { it.status != "removed" }.sortedBy { it.name.lowercase() }
+        _agents.value = found.values.sortedBy { it.name.lowercase() }
         groups = hub.rooms().associateBy { it.id }
     }
 
     private suspend fun loadInbox() {
         val seen = session.seen()
-        val list = hub().inbox(seen).map { e ->
+        // Conversations of deleted groups and agents keep their history on
+        // the hub but are not listed. Agents on other machines are kept
+        // while the machine is out of reach.
+        val list = hub().inbox(seen).filter { it.room in groups || it.room in members || "::" in it.room }.map { e ->
             val room = e.room
             val unread = if (_chat.value?.id == room) 0 else e.unread
             Conversation(room, nameOf(room), preview(e.latest), unread, room in groups, e.latest.at, working[room].orEmpty().isNotEmpty())
@@ -209,9 +217,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 val hub = hub()
                 val page = hub.messages(id)
                 val receipts = runCatching { hub.receipts(id) }.getOrDefault(emptyMap())
+                val run = runCatching { hub.runs().firstOrNull { it.id == id }?.status }.getOrNull().orEmpty()
                 val seen = session.seen()[id] ?: 0
                 val firstUnread = page.firstOrNull { it.seq > seen && it.sender != "you" }?.seq ?: 0
-                _chat.update { c -> c?.takeIf { it.id == id }?.let { it.copy(messages = merge(it.messages, page), receipts = receipts, firstUnread = firstUnread, loading = false, older = page.size >= 60) } }
+                _chat.update { c -> c?.takeIf { it.id == id }?.let { it.copy(messages = merge(it.messages, page), receipts = receipts, run = run, firstUnread = firstUnread, loading = false, older = page.size >= 60) } }
                 markSeen()
             } catch (e: IOException) {
                 _chat.update { c -> c?.takeIf { it.id == id }?.copy(loading = false, problem = explain(e)) }
@@ -247,12 +256,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Sends the owner's message, showing it at once and confirming when the hub has it. */
-    fun send(text: String) {
+    fun send(text: String, file: String = "") {
         val c = _chat.value ?: return
         val body = text.trim()
-        if (body.isEmpty()) return
+        if (body.isEmpty() && file.isEmpty()) return
         val clientId = UUID.randomUUID().toString().replace("-", "")
-        val pending = Message(id = "pending-$clientId", room = c.id, sender = "you", text = body, kind = "pending", clientId = clientId, at = java.time.Instant.now().toString())
+        val pending = Message(id = "pending-$clientId", room = c.id, sender = "you", text = body, file = file, kind = "pending", clientId = clientId, at = java.time.Instant.now().toString())
         _chat.update { it?.copy(messages = it.messages + pending, problem = null) }
         post(c.id, pending)
     }
@@ -268,7 +277,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private fun post(room: String, pending: Message) {
         viewModelScope.launch {
             try {
-                val sent = hub().send(room, pending.text, pending.clientId)
+                val sent = hub().send(room, pending.text, pending.clientId, pending.file)
                 _chat.update { s -> s?.takeIf { it.id == room }?.copy(messages = merge(s.messages.filter { it.id != pending.id }, listOf(sent))) }
                 markSeen()
             } catch (e: IOException) {
@@ -285,6 +294,52 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private fun markSeen() {
         val c = _chat.value ?: return
         c.messages.lastOrNull { it.seq > 0 }?.let { session.markSeen(c.id, it.seq) }
+    }
+
+    // Commands, files, and controls
+
+    /** Runs a slash command for the agent of the open private chat. */
+    fun command(name: String, arg: String) {
+        val c = _chat.value ?: return
+        viewModelScope.launch {
+            try {
+                val r = hub().command(c.id, name, arg)
+                r.session?.let { a -> members[c.id]?.let { m -> members = members + (c.id to m.copy(name = a.name, handle = a.handle, status = a.status, folder = a.folder, model = a.model)) } }
+                _chat.update { s -> s?.takeIf { it.id == c.id }?.copy(messages = merge(s.messages, listOfNotNull(r.note)), members = membersOf(c.id), name = nameOf(c.id), problem = null) }
+            } catch (e: IOException) {
+                _chat.update { s -> s?.copy(problem = explain(e)) }
+            }
+        }
+    }
+
+    suspend fun files(path: String): List<io.github.phantomconartist.mace.data.Entry> = hub().files(path)
+
+    suspend fun models(agent: String): io.github.phantomconartist.mace.data.Models = hub().models(agent)
+
+    /** Pauses the open conversation's work, or lets it continue. */
+    fun setPaused(paused: Boolean) {
+        val c = _chat.value ?: return
+        viewModelScope.launch {
+            try {
+                if (paused) hub().pause(c.id) else hub().resume(c.id)
+                _chat.update { s -> s?.takeIf { it.id == c.id }?.copy(run = if (paused) "paused" else "running", problem = null) }
+            } catch (e: IOException) {
+                _chat.update { s -> s?.copy(problem = explain(e)) }
+            }
+        }
+    }
+
+    /** stop, terminate, or resume an agent. */
+    fun control(agent: String, action: String) {
+        viewModelScope.launch {
+            try {
+                val a = hub().control(agent, action)
+                members[agent]?.let { members = members + (agent to it.copy(status = a.status)) }
+                _chat.update { s -> s?.copy(members = s.members.map { if (it.id == agent) it.copy(status = a.status) else it }, problem = null) }
+            } catch (e: IOException) {
+                _chat.update { s -> s?.copy(problem = explain(e)) }
+            }
+        }
     }
 
     // Live events
@@ -318,6 +373,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 _chat.update { c -> if (c == null || c.id != room) c else c.copy(receipts = c.receipts + (member to seq)) }
             }
             "room", "session" -> refreshSoon(directory = true)
+            "run" -> {
+                val id = e.data["id"]?.jsonPrimitive?.contentOrNullSafe()
+                val status = e.data["status"]?.jsonPrimitive?.contentOrNullSafe() ?: return
+                _chat.update { c -> if (c == null || c.id != id) c else c.copy(run = status) }
+            }
             "records" -> {
                 val conversation = e.data["conversation"]?.jsonPrimitive?.contentOrNullSafe()
                 _chat.value?.takeIf { it.id == conversation || it.id.endsWith("::$conversation") }?.let { open(it.id) }

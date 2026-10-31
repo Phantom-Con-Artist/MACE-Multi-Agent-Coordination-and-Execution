@@ -50,6 +50,12 @@ class MainActivity : ComponentActivity() {
                                 onRetry = model::retry,
                                 onOlder = model::loadOlder,
                                 onInserted = model::inserted,
+                                onCommand = model::command,
+                                onPause = model::setPaused,
+                                onControl = model::control,
+                                files = model::files,
+                                models = model::models,
+                                onSendFile = model::send,
                             )
                             else -> when (val s = screen) {
                                 is Screen.SignIn -> SignInScreen(s, model::signIn)

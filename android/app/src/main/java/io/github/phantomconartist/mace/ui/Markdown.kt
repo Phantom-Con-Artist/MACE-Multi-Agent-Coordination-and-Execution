@@ -23,6 +23,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,14 +78,25 @@ private fun blocks(source: String): List<Block> {
     return out
 }
 
-private val inline = Regex("""`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)""")
+private val inline = Regex("""\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)""")
 
-private fun styled(text: String, codeBg: Color): AnnotatedString = buildAnnotatedString {
+private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspecified): AnnotatedString = buildAnnotatedString {
     var at = 0
     for (m in inline.findAll(text)) {
         append(text.substring(at, m.range.first))
-        val (code, bold, bold2, italic, italic2) = m.destructured
+        val g = m.groupValues
+        val label = g[1].trim('`')
+        val url = g[2]
+        val code = g[3]
+        val bold = g[4]
+        val bold2 = g[5]
+        val italic = g[6]
+        val italic2 = g[7]
         when {
+            // Web links open in the browser; file links show their name.
+            label.isNotEmpty() && (url.startsWith("http://") || url.startsWith("https://")) ->
+                withLink(androidx.compose.ui.text.LinkAnnotation.Url(url, androidx.compose.ui.text.TextLinkStyles(SpanStyle(color = linkColor, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))) { append(label) }
+            label.isNotEmpty() -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 14.sp)) { append(label) }
             code.isNotEmpty() -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg, fontSize = 14.sp)) { append(code) }
             bold.isNotEmpty() || bold2.isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.W700)) { append(bold + bold2) }
             else -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(italic + italic2) }
@@ -98,21 +110,22 @@ private fun styled(text: String, codeBg: Color): AnnotatedString = buildAnnotate
 fun Markdown(text: String, color: Color, modifier: Modifier = Modifier) {
     val parsed = remember(text) { blocks(text) }
     val codeBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    val link = MaterialTheme.colorScheme.primary
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             parsed.forEach { b ->
                 when (b) {
-                    is Block.Text -> Text(styled(b.text, codeBg), style = MaterialTheme.typography.bodyLarge, color = color)
-                    is Block.Heading -> Text(styled(b.text, codeBg), style = MaterialTheme.typography.titleMedium, color = color)
+                    is Block.Text -> Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.bodyLarge, color = color)
+                    is Block.Heading -> Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.titleMedium, color = color)
                     is Block.Quote -> Text(
-                        styled(b.text, codeBg),
+                        styled(b.text, codeBg, link),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 4.dp).background(codeBg, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                     is Block.Item -> Row {
                         Text(b.marker, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                        Text(styled(b.text, codeBg), style = MaterialTheme.typography.bodyLarge, color = color)
+                        Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.bodyLarge, color = color)
                     }
                     is Block.Code -> Text(
                         b.code,
