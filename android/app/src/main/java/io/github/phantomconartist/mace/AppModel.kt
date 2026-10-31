@@ -260,7 +260,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                     // A machine that does not answer keeps its agents listed, marked unreachable.
                     if (list == null) found.keys.filter { it.startsWith(p.id + "::") }.forEach { k -> found[k] = found[k]!!.copy(reachable = false) }
                     list?.let { l -> synchronized(this@AppModel) { remoteSeen = remoteSeen.filter { it.machine != p.name } + l.map { io.github.phantomconartist.mace.data.RemoteAgent(p.name, it) } } }
-                    list.orEmpty().filter { it.status != "removed" }.map { a -> Member(a.id, a.name, a.handle, a.provider, a.status, p.name, a.folder, a.model, a.role, a.photo) }
+                    list.orEmpty().filter { it.status != "removed" }.map { a -> Member(a.id, a.name.removePrefix(p.name + " / "), a.handle, a.provider, a.status, p.name, a.folder, a.model, a.role, a.photo) }
                 }
             }.awaitAll().flatten().forEach { found[it.id] = it }
         }
@@ -684,7 +684,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         (groups[id]?.members ?: listOf(id)).mapNotNull { members[it] }
 
     private fun nameOf(id: String): String =
-        groups[id]?.name ?: members[id]?.let { m -> m.machine?.let { "${m.name} · $it" } ?: m.name } ?: id.substringAfter("::")
+        groups[id]?.name ?: members[id]?.name ?: id.substringAfter("::")
 
     private fun preview(m: Message): String {
         val who = when (m.sender) {
