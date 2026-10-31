@@ -22,6 +22,10 @@ compose-icons = { module = "androidx.compose.material:material-icons-extended" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version = "1.8.9" }
+androidx-biometric = { module = "androidx.biometric:biometric", version = "1.1.0" }
+zxing-core = { module = "com.google.zxing:core", version = "3.5.3" }
+gms-code-scanner = { module = "com.google.android.gms:play-services-code-scanner", version = "16.1.0" }
 junit = { module = "junit:junit", version = "4.13.2" }
 
 [plugins]

@@ -73,6 +73,13 @@ func (h *APIHandler) rooms(w http.ResponseWriter, r *http.Request) {
 		for _, b := range v {
 			var room Room
 			if json.Unmarshal(b, &room) == nil && !room.Removed {
+				if t := photoTime(room.ID); t > 0 {
+					var fields map[string]any
+					if json.Unmarshal(b, &fields) == nil {
+						fields["photo"] = t
+						b, _ = json.Marshal(fields)
+					}
+				}
 				visible = append(visible, b)
 			}
 		}

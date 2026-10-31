@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files opened from chats are downloaded here and handed to a viewer app. -->
+<paths>
+    <cache-path name="opened" path="opened/" />
+</paths>

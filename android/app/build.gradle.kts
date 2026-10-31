@@ -83,6 +83,11 @@ dependencies {
     implementation(libs.compose.icons)
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
+    // Biometric 1.1 pulls an old Fragment that rejects modern result request codes.
+    implementation(libs.androidx.fragment)
+    implementation(libs.androidx.biometric)
+    implementation(libs.zxing.core)
+    implementation(libs.gms.code.scanner)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)

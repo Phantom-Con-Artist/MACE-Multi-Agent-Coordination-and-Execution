@@ -25,6 +25,9 @@ type Session struct {
 	Color *int `json:"color,omitempty"`
 	// Avatar reports a logo the owner provided for this agent's provider.
 	Avatar    bool   `json:"avatar,omitempty"`
+	// Photo is when the agent's own picture last changed, as Unix seconds;
+	// 0 when it has none. Apps load it from /sessions/{id}/photo.
+	Photo     int64  `json:"photo,omitempty"`
 	Directory string `json:"working_dir"`
 	Status    string `json:"status"`
 	// NativeSession is the CLI's own session ID, shared by every conversation
@@ -66,6 +69,7 @@ func (h *APIHandler) sessions(w http.ResponseWriter, r *http.Request) {
 			var s Session
 			if json.Unmarshal(b, &s) == nil {
 				s.Avatar = ownerAvatar(s.Provider) != ""
+				s.Photo = photoTime(s.ID)
 				out = append(out, s)
 			}
 		}

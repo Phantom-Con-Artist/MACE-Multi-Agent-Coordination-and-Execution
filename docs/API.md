@@ -61,12 +61,13 @@ Both are per device, appear under Settings, Devices, and stop working when revok
 
 An agent is a CLI session (agy, Muse, Claude Code, Codex, …) in a working folder. Agents on other machines have IDs of the form `<machine>::<agent>`.
 
-`Session` (an agent) is `{"id", "name", "handle", "provider", "model", "role", "color", "avatar", "working_dir", "status"}`. `status` is one of `ready`, `replying`, `stopped`, `terminated`, `removed`.
+`Session` (an agent) is `{"id", "name", "handle", "provider", "model", "role", "color", "avatar", "photo", "working_dir", "status"}`. `status` is one of `ready`, `replying`, `stopped`, `terminated`, `removed`.
 
 - `GET /api/v1/sessions`: agents on this machine.
 - `POST /api/v1/sessions` with `{"provider": "agy", "working_dir": "/path"}` starts one; returns the `Session` (201).
 - `POST /api/v1/sessions/{id}/control` with `{"action": "stop" | "terminate" | "remove" | "resume"}`.
 - `POST /api/v1/sessions/{id}/profile` with any of `{"name", "handle", "role", "color"}`.
+- `GET|POST|DELETE /api/v1/sessions/{id}/photo`: the agent's own picture. POST sends a PNG, JPEG, or WebP image up to 2 MB as the body. `Session.photo` is when it last changed (Unix seconds), absent when there is none.
 - `POST /api/v1/sessions/{id}/command` with `{"name": "model", "arg": "…"}`: a slash command for the CLI.
 - `GET /api/v1/sessions/{id}/models`: models the agent's CLI offers.
 - `GET /api/v1/avatars/{provider}`: the provider's avatar image.
@@ -75,15 +76,17 @@ An agent is a CLI session (agy, Muse, Claude Code, Codex, …) in a working fold
 
 A conversation is a direct chat (its ID is the agent's ID) or a group (`Room`).
 
-`Room` is `{"id", "name", "members": [agent IDs], "roles": {agent: role}, "claimed": {agent: role}, "flairs", "parent"}`. A room with `parent` is a side chat inside that group.
+`Room` is `{"id", "name", "members": [agent IDs], "roles": {agent: role}, "claimed": {agent: role}, "flairs", "parent", "photo"}`. A room with `parent` is a side chat inside that group.
 
 `Message` is `{"id", "room", "sender", "text", "file", "kind", "flair", "role", "client_id", "at", "seq", "mentions", "mentions_all", "activity", "delivery", "origin"}`. `sender` is `you` for the owner, `mace` for notes from MACE, or an agent ID. `file` is a path under the hub's shared folder; a folder ends in `/`. `activity` lists the agent's steps while replying: `{"id", "kind", "title", "detail", "state", "at"}`. `seq` orders messages within a conversation.
 
 - `GET /api/v1/rooms`, `POST /api/v1/rooms` with `{"name", "members"}`, `DELETE /api/v1/rooms/{room}`.
+- `GET|POST|DELETE /api/v1/rooms/{room}/photo`: the group's picture, the same as an agent's; `Room.photo` is when it last changed.
 - `POST /api/v1/rooms/{room}/members` with `{"member"}`; `POST /api/v1/rooms/{room}/members/{member}/role` with `{"role"}`; `POST /api/v1/rooms/{room}/members/{member}/remove`.
 - `GET /api/v1/chats/{room}/messages?before=<seq>&after=<seq>&limit=<n>`: newest first page by default, oldest to newest within the page.
 - `POST /api/v1/chats/{room}/messages` with `{"text", "file", "client_id"}`. `client_id` makes a retry safe: the same ID is posted once.
 - `GET|POST /api/v1/chats/{room}/policy`: `Policy` is `{"mode": "reply" | "goal" | "continuous" | "team", "goal", "limit", "tone", "lead"}`.
+- `POST /api/v1/chats/{room}/upload?name=<file name>` with a file up to 200 MB as the body stores it with the conversation and answers `{"file", "size"}`; post a message with that `file` to send it. Agents share files back by writing `[share: path]`, which the hub turns into a message's `file`.
 - `POST /api/v1/chats/{room}/pause` pauses the conversation and `POST /api/v1/chats/{room}/continue` resumes it. `POST /api/v1/chats/{room}/start` always answers 409: conversations start when the owner writes.
 - `GET /api/v1/chats/{room}/receipts`: how far each agent has read, by `seq`.
 - `GET /api/v1/runs`: the state of every conversation's work, `Run` is `{"id", "status", "replies", "policy", "error", "active_members", "usage": Usage}`.
@@ -126,4 +129,4 @@ Clients ignore events they do not know. An open app sends `POST /api/v1/presence
 
 ## Planned additions to version 1
 
-These will be added without breaking anything above: uploading a file from a device into a conversation (for the Android share target), registering an app for push notifications, and a per-conversation summary for notification replies.
+These will be added without breaking anything above: registering an app for push notifications, and a per-conversation summary for notification replies.

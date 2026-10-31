@@ -5,6 +5,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -106,39 +108,51 @@ private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspeci
     append(text.substring(at))
 }
 
+/**
+ * Renders an agent's Markdown. reserve is invisible text at the end of the
+ * last line, room for the bubble's time to sit beside it; a message that
+ * ends in code or a quote puts the time on a line of its own.
+ */
 @Composable
-fun Markdown(text: String, color: Color, modifier: Modifier = Modifier) {
+fun Markdown(text: String, color: Color, modifier: Modifier = Modifier, reserve: String = "") {
     val parsed = remember(text) { blocks(text) }
-    val codeBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    val codeBg = color.copy(alpha = 0.09f)
     val link = MaterialTheme.colorScheme.primary
+    fun body(b: String, last: Boolean): AnnotatedString {
+        val s = styled(b, codeBg, link)
+        if (!last || reserve.isEmpty()) return s
+        return buildAnnotatedString { append(s); withStyle(SpanStyle(color = Color.Transparent, fontSize = 11.sp)) { append(reserve) } }
+    }
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            parsed.forEach { b ->
+            parsed.forEachIndexed { i, b ->
+                val last = i == parsed.lastIndex
                 when (b) {
-                    is Block.Text -> Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.bodyLarge, color = color)
-                    is Block.Heading -> Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.titleMedium, color = color)
+                    is Block.Text -> Text(body(b.text, last), style = MaterialTheme.typography.bodyLarge, color = color)
+                    is Block.Heading -> Text(body(b.text, last), style = MaterialTheme.typography.titleMedium, color = color)
                     is Block.Quote -> Text(
                         styled(b.text, codeBg, link),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = color.copy(alpha = 0.75f),
                         modifier = Modifier.padding(start = 4.dp).background(codeBg, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                     is Block.Item -> Row {
                         Text(b.marker, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                        Text(styled(b.text, codeBg, link), style = MaterialTheme.typography.bodyLarge, color = color)
+                        Text(body(b.text, last), style = MaterialTheme.typography.bodyLarge, color = color)
                     }
                     is Block.Code -> Text(
                         b.code,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp,
                         lineHeight = 19.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = color,
                         softWrap = false,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(codeBg)
                             .horizontalScroll(rememberScrollState()).padding(12.dp),
                     )
                 }
             }
+            if (reserve.isNotEmpty() && (parsed.lastOrNull() is Block.Code || parsed.lastOrNull() is Block.Quote)) Spacer(Modifier.height(10.dp))
         }
     }
 }

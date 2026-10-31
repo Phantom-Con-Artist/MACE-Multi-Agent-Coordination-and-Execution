@@ -7,13 +7,20 @@ import androidx.lifecycle.viewModelScope
 import io.github.phantomconartist.mace.data.Hub
 import io.github.phantomconartist.mace.data.HubEvent
 import io.github.phantomconartist.mace.data.HubException
+import io.github.phantomconartist.mace.data.Device
 import io.github.phantomconartist.mace.data.Message
+import io.github.phantomconartist.mace.data.Node
+import io.github.phantomconartist.mace.data.Policy
+import io.github.phantomconartist.mace.data.Provider
+import io.github.phantomconartist.mace.data.Room
 import io.github.phantomconartist.mace.data.Session
 import io.github.phantomconartist.mace.data.SignInLink
 import io.github.phantomconartist.mace.data.Step
 import io.github.phantomconartist.mace.data.events
 import io.github.phantomconartist.mace.data.json
 import java.io.IOException
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okio.source
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -29,7 +36,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /** An agent, on this hub or on one of the owner's other machines. */
-data class Member(val id: String, val name: String, val handle: String, val provider: String, val status: String, val machine: String?, val folder: String = "", val model: String = "")
+data class Member(val id: String, val name: String, val handle: String, val provider: String, val status: String, val machine: String?, val folder: String = "", val model: String = "", val role: String = "", val photo: Long = 0, val reachable: Boolean = true) {
+    /** Can answer now: its machine is up and the agent is not stopped. */
+    val online: Boolean get() = reachable && status != "stopped" && status != "terminated"
+}
 
 /** One row of the chat list. */
 data class Conversation(
@@ -40,6 +50,11 @@ data class Conversation(
     val group: Boolean,
     val at: String,
     val working: Boolean,
+    /** The photo's address on the hub, when there is one. */
+    val photo: String? = null,
+    /** Agents that can answer now; for a group, how many of its agents can. */
+    val online: Int = 0,
+    val members: Int = 1,
 )
 
 enum class Filter(val label: String) { All("All"), Unread("Unread"), Groups("Groups"), Agents("Agents") }
@@ -77,7 +92,23 @@ data class ChatState(
 
 class AppModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
-    private val _screen = MutableStateFlow<Screen>(if (session.credential != null) Screen.Home(session.hubName) else Screen.SignIn())
+    val media = io.github.phantomconartist.mace.ui.MediaLoader { hub() }
+    private val sounds = io.github.phantomconartist.mace.ui.Sounds(app).also { it.enabled = session.sounds }
+    private val _observe = MutableStateFlow(session.observe)
+    /** Observe view shows agents' tool calls and file edits; messenger view only messages. */
+    val observe: StateFlow<Boolean> = _observe
+    private val _soundsOn = MutableStateFlow(session.sounds)
+    val soundsOn: StateFlow<Boolean> = _soundsOn
+
+    fun setObserve(on: Boolean) { session.observe = on; _observe.value = on }
+
+    fun setSounds(on: Boolean) { session.sounds = on; sounds.enabled = on; _soundsOn.value = on }
+    private val cache = io.github.phantomconartist.mace.data.Cache(app.filesDir)
+    // Saved chats open without a link; only linking to a hub needs the QR and the screen lock.
+    private val _screen = MutableStateFlow<Screen>(if (session.credential != null || cache.snapshot() != null) Screen.Home(session.hubName) else Screen.SignIn())
+    private val _linked = MutableStateFlow(session.credential != null)
+    /** Linked to a hub; unlinked, the app shows saved chats read-only. */
+    val linked: StateFlow<Boolean> = _linked
     val screen: StateFlow<Screen> = _screen
     private val _chat = MutableStateFlow<ChatState?>(null)
     val chat: StateFlow<ChatState?> = _chat
@@ -86,13 +117,37 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     val agents: StateFlow<List<Member>> = _agents
 
     private var members = mapOf<String, Member>()
-    private var groups = mapOf<String, io.github.phantomconartist.mace.data.Room>()
+    private var groups = mapOf<String, Room>()
+    private val _rooms = MutableStateFlow<Map<String, Room>>(emptyMap())
+    /** Groups by ID, with their members and roles. */
+    val rooms: StateFlow<Map<String, Room>> = _rooms
+    private val _notice = MutableStateFlow<String?>(null)
+    /** A short result or problem to show once, such as "Group created". */
+    val notice: StateFlow<String?> = _notice
     private var stream: Job? = null
     private var pendingRefresh: Job? = null
     private var working = mapOf<String, Set<String>>()
 
+    private var remoteSeen = listOf<io.github.phantomconartist.mace.data.RemoteAgent>()
+    private var inboxSeen = listOf<io.github.phantomconartist.mace.data.InboxEntry>()
+
     init {
+        restore()
         if (session.credential != null) start()
+    }
+
+    /** Shows the saved chat list at once; agents count as unreachable until the hub answers. */
+    private fun restore() {
+        val s = cache.snapshot() ?: return
+        members = (s.agents.map { Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model, it.role, it.photo, reachable = false) } +
+            s.remote.map { r -> Member(r.agent.id, r.agent.name, r.agent.handle, r.agent.provider, r.agent.status, r.machine, r.agent.folder, r.agent.model, r.agent.role, r.agent.photo, reachable = false) })
+            .associateBy { it.id }
+        remoteSeen = s.remote
+        groups = s.rooms.associateBy { it.id }
+        _rooms.value = groups
+        _agents.value = members.values.sortedBy { it.name.lowercase() }
+        inboxSeen = s.inbox
+        showInbox(s.inbox, loading = true)
     }
 
     private fun hub() = Hub(session.origin.orEmpty(), session.credential)
@@ -127,6 +182,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 }
                 val grant = Hub(link.origin).signIn(link.code, "MACE on ${Build.MODEL}")
                 session.save(link.origin, grant.credential, grant.name)
+                _linked.value = true
                 _screen.value = Screen.Home(grant.name)
                 start()
             } catch (e: IOException) {
@@ -136,10 +192,33 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut(problem: String? = null) {
+        if (problem == null) {
+            val hub = hub()
+            viewModelScope.launch { runCatching { hub.signOutHere() } }
+        }
         stream?.cancel()
         session.clear()
+        _linked.value = false
+        // Saved chats stay readable after unlinking.
+        _screen.value = if (cache.snapshot() != null) Screen.Home(session.hubName, conversations = (_screen.value as? Screen.Home)?.conversations.orEmpty(), loading = false, problem = problem)
+            else Screen.SignIn(problem = problem)
+        _chat.update { it?.copy(loading = false) }
+    }
+
+    /** Opens the link screen from the saved chats. */
+    fun showLink() { _chat.value = null; _screen.value = Screen.SignIn() }
+
+    /** Back from the link screen to the saved chats, when there are any. */
+    fun cancelLink() { if (cache.snapshot() != null) { _screen.value = Screen.Home(session.hubName, loading = false); restore() } }
+
+    val hasSaved: Boolean get() = cache.snapshot() != null
+
+    /** Forgets every saved chat on this phone. The hub keeps its history. */
+    fun deleteSaved() {
+        cache.clear()
+        members = emptyMap(); groups = emptyMap(); _rooms.value = emptyMap(); _agents.value = emptyList()
         _chat.value = null
-        _screen.value = Screen.SignIn(problem = problem)
+        _screen.value = if (_linked.value) Screen.Home(session.hubName).also { refresh() } else Screen.SignIn()
     }
 
     // The chat list
@@ -150,6 +229,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         val current = _screen.value as? Screen.Home ?: return
+        if (!_linked.value) { _screen.value = current.copy(loading = false); return }
         _screen.value = current.copy(loading = true, problem = null)
         viewModelScope.launch {
             try {
@@ -170,29 +250,47 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadDirectory(remote: Boolean = true) {
         val hub = hub()
         val found = members.filterValues { it.machine != null }.toMutableMap()
-        hub.agents().filter { it.status != "removed" }.forEach { found[it.id] = Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model) }
+        val local = hub.agents()
+        local.filter { it.status != "removed" }.forEach { found[it.id] = Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model, it.role, it.photo) }
         // Agents on other machines carry the machine's ID before "::".
         if (remote) viewModelScope.run {
             hub.peers().map { p ->
-                async { runCatching { hub.peerAgents(p.id) }.getOrDefault(emptyList()).filter { it.status != "removed" }.map { a -> Member(a.id, a.name, a.handle, a.provider, a.status, p.name, a.folder, a.model) } }
+                async {
+                    val list = runCatching { hub.peerAgents(p.id) }.getOrNull()
+                    // A machine that does not answer keeps its agents listed, marked unreachable.
+                    if (list == null) found.keys.filter { it.startsWith(p.id + "::") }.forEach { k -> found[k] = found[k]!!.copy(reachable = false) }
+                    list?.let { l -> synchronized(this@AppModel) { remoteSeen = remoteSeen.filter { it.machine != p.name } + l.map { io.github.phantomconartist.mace.data.RemoteAgent(p.name, it) } } }
+                    list.orEmpty().filter { it.status != "removed" }.map { a -> Member(a.id, a.name, a.handle, a.provider, a.status, p.name, a.folder, a.model, a.role, a.photo) }
+                }
             }.awaitAll().flatten().forEach { found[it.id] = it }
         }
         members = found
         _agents.value = found.values.sortedBy { it.name.lowercase() }
-        groups = hub.rooms().associateBy { it.id }
+        val rooms = hub.rooms()
+        groups = rooms.associateBy { it.id }
+        _rooms.value = groups
+        cache.saveSnapshot(io.github.phantomconartist.mace.data.Snapshot(local, remoteSeen, rooms, inboxSeen))
+        _chat.update { c -> c?.copy(members = membersOf(c.id), name = nameOf(c.id), group = c.id in groups) }
     }
 
     private suspend fun loadInbox() {
-        val seen = session.seen()
+        val entries = hub().inbox(session.seen())
+        inboxSeen = entries
+        cache.snapshot()?.let { cache.saveSnapshot(it.copy(inbox = entries)) }
+        showInbox(entries, loading = false)
+    }
+
+    private fun showInbox(entries: List<io.github.phantomconartist.mace.data.InboxEntry>, loading: Boolean) {
         // Conversations of deleted groups and agents keep their history on
         // the hub but are not listed. Agents on other machines are kept
         // while the machine is out of reach.
-        val list = hub().inbox(seen).filter { it.room in groups || it.room in members || "::" in it.room }.map { e ->
+        val list = entries.filter { it.room in groups || it.room in members || "::" in it.room }.map { e ->
             val room = e.room
             val unread = if (_chat.value?.id == room) 0 else e.unread
-            Conversation(room, nameOf(room), preview(e.latest), unread, room in groups, e.latest.at, working[room].orEmpty().isNotEmpty())
+            Conversation(room, nameOf(room), preview(e.latest), unread, room in groups, e.latest.at, working[room].orEmpty().isNotEmpty(), photoOf(room),
+                online = membersIds(room).count { members[it]?.online == true }, members = membersIds(room).size)
         }.sortedByDescending { it.at }
-        _screen.update { (it as? Screen.Home)?.copy(conversations = list, loading = false, hub = session.hubName) ?: it }
+        _screen.update { (it as? Screen.Home)?.copy(conversations = list, loading = loading, hub = session.hubName) ?: it }
     }
 
     /** Refreshes the chat list soon, once, however many events ask for it. */
@@ -210,8 +308,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     // The open conversation
 
     fun open(id: String) {
+        if (!_linked.value) {
+            _chat.value = ChatState(id, nameOf(id), id in groups, membersOf(id), messages = cache.messages(id).orEmpty(), loading = false, older = false)
+            return
+        }
         val members = membersOf(id)
-        _chat.value = ChatState(id, nameOf(id), id in groups, members)
+        _chat.value = ChatState(id, nameOf(id), id in groups, members, messages = cache.messages(id).orEmpty())
         viewModelScope.launch {
             try {
                 val hub = hub()
@@ -220,15 +322,18 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 val run = runCatching { hub.runs().firstOrNull { it.id == id }?.status }.getOrNull().orEmpty()
                 val seen = session.seen()[id] ?: 0
                 val firstUnread = page.firstOrNull { it.seq > seen && it.sender != "you" }?.seq ?: 0
+                cache.saveMessages(id, page)
                 _chat.update { c -> c?.takeIf { it.id == id }?.let { it.copy(messages = merge(it.messages, page), receipts = receipts, run = run, firstUnread = firstUnread, loading = false, older = page.size >= 60) } }
                 markSeen()
             } catch (e: IOException) {
-                _chat.update { c -> c?.takeIf { it.id == id }?.copy(loading = false, problem = explain(e)) }
+                val saved = _chat.value?.messages?.isNotEmpty() == true
+                _chat.update { c -> c?.takeIf { it.id == id }?.copy(loading = false, problem = if (saved) "Showing saved messages. " + explain(e) else explain(e)) }
             }
         }
     }
 
     fun close() {
+        _chat.value?.let { c -> cache.saveMessages(c.id, c.messages) }
         markSeen()
         _chat.value = null
         refreshSoon()
@@ -278,6 +383,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val sent = hub().send(room, pending.text, pending.clientId, pending.file)
+                sounds.sent()
                 _chat.update { s -> s?.takeIf { it.id == room }?.copy(messages = merge(s.messages.filter { it.id != pending.id }, listOf(sent))) }
                 markSeen()
             } catch (e: IOException) {
@@ -342,6 +448,169 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // Groups, agents, and settings
+
+    fun noticeShown() { _notice.value = null }
+
+    /** Runs a change on the hub, then reloads the directory and says how it went. */
+    private fun act(done: String? = null, then: () -> Unit = {}, block: suspend Hub.() -> Unit) {
+        viewModelScope.launch {
+            try {
+                hub().block()
+                runCatching { loadDirectory(); loadInbox() }
+                done?.let { _notice.value = it }
+                then()
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            }
+        }
+    }
+
+    fun createGroup(name: String, members: List<String>) {
+        viewModelScope.launch {
+            try {
+                val room = hub().createGroup(name.trim(), members)
+                runCatching { loadDirectory(); loadInbox() }
+                open(room.id)
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            }
+        }
+    }
+
+    /** Removes a group, or an agent from every chat. History stays on the hub. */
+    fun removeConversation(id: String) = act(if (id in groups) "Group removed. Its history is kept." else "Agent removed. Its history is kept.", then = {
+        if (_chat.value?.id == id) _chat.value = null
+    }) {
+        if (id in groups) removeGroup(id) else control(id, "remove")
+    }
+
+    fun markRead(ids: Set<String>) {
+        viewModelScope.launch {
+            runCatching { hub().inbox(session.seen()) }.getOrNull()?.filter { it.room in ids }?.forEach { session.markSeen(it.room, it.latest.seq) }
+            runCatching { loadInbox() }
+        }
+    }
+
+    fun addMember(room: String, member: String) = act { addMember(room, member) }
+
+    fun removeMember(room: String, member: String) = act { removeMember(room, member) }
+
+    fun setRole(room: String, member: String, role: String) = act("Role saved. It applies on their next turn.") { setRole(room, member, role.trim()) }
+
+    suspend fun policy(room: String): Policy = hub().policy(room)
+
+    fun savePolicy(room: String, policy: Policy) = act("Conversation mode saved.") { setPolicy(room, policy) }
+
+    fun saveProfile(agent: String, name: String, handle: String, role: String) =
+        act("Saved. Every conversation uses this on the next turn.") { profile(agent, name.trim(), handle.trim(), role.trim()) }
+
+    suspend fun catalog(machine: String?): List<Provider> = hub().catalog(machine).providers
+
+    suspend fun machineFiles(machine: String?, path: String): List<io.github.phantomconartist.mace.data.Entry> =
+        if (machine == null) hub().files(path) else hub().machineFiles(machine, path)
+
+    /** Starts an agent and opens its chat. */
+    fun startAgent(machine: String?, provider: String, folder: String) {
+        viewModelScope.launch {
+            try {
+                val a = hub().startAgent(machine, provider, folder)
+                runCatching { loadDirectory(); loadInbox() }
+                val id = members.keys.firstOrNull { it == a.id || it.endsWith("::" + a.id) } ?: a.id
+                open(id)
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            }
+        }
+    }
+
+    suspend fun nodes(): List<Node> = hub().nodes()
+
+    suspend fun peers(): List<io.github.phantomconartist.mace.data.Peer> = hub().peers()
+
+    /** Files shared in a conversation, newest first, for its info page. */
+    suspend fun sharedFiles(id: String): List<Message> = hub().messages(id, limit = 200).filter { it.file.isNotEmpty() }.reversed()
+
+    /** Pauses or continues a conversation from its info page. */
+    fun setPausedFor(id: String, paused: Boolean) = act(if (paused) "Paused." else "Continuing.", then = {
+        _chat.update { s -> s?.takeIf { it.id == id }?.copy(run = if (paused) "paused" else "running") }
+    }) { if (paused) pause(id) else resume(id) }
+
+    suspend fun devices(): List<Device> = hub().devices()
+
+    fun revoke(device: String) = act("Signed out.") { revoke(device) }
+
+    suspend fun keepWorking(): Boolean = hub().presenceSettings().keepWorking
+
+    fun setKeepWorking(on: Boolean) = act { setKeepWorking(on) }
+
+    suspend fun signInLink(): String = hub().signInLink().link
+
+    // Pictures, videos, and files
+
+    /** Sends a file from the phone: uploads it, then posts it like any message, with an optional caption. */
+    fun upload(uri: android.net.Uri, caption: String = "") {
+        val c = _chat.value ?: return
+        val resolver = getApplication<Application>().contentResolver
+        val name = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "file"
+        val type = resolver.getType(uri).orEmpty()
+        val clientId = UUID.randomUUID().toString().replace("-", "")
+        val pending = Message(id = "pending-$clientId", room = c.id, sender = "you", text = caption.trim(), file = name, kind = "pending", clientId = clientId, at = java.time.Instant.now().toString())
+        _chat.update { it?.copy(messages = it.messages + pending, problem = null) }
+        viewModelScope.launch {
+            try {
+                val body = object : okhttp3.RequestBody() {
+                    override fun contentType() = type.ifEmpty { "application/octet-stream" }.toMediaTypeOrNull()
+                    override fun writeTo(sink: okio.BufferedSink) {
+                        resolver.openInputStream(uri)?.use { sink.writeAll(it.source()) } ?: throw IOException("Could not read this file.")
+                    }
+                }
+                val up = hub().upload(c.id, name, type, body)
+                val ready = pending.copy(file = up.file)
+                _chat.update { s -> s?.copy(messages = s.messages.map { if (it.id == pending.id) ready else it }) }
+                post(c.id, ready)
+            } catch (e: IOException) {
+                _chat.update { s -> s?.copy(messages = s.messages.filter { it.id != pending.id }, problem = explain(e)) }
+            }
+        }
+    }
+
+    /** Opens a hub file in the phone's own viewer: pictures, videos, documents. */
+    fun openFile(path: String, launch: (android.content.Intent) -> Unit) {
+        if (path.endsWith("/")) { _notice.value = "Folders open on the computer. Browse it from the chat's files."; return }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                val target = java.io.File(app.cacheDir, "opened/" + path.hashCode().toUInt().toString(16) + "/" + path.substringAfterLast('/'))
+                if (!target.exists()) hub().download(path, target)
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", target)
+                val type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('.', "").lowercase()) ?: "*/*"
+                launch(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            } catch (e: android.content.ActivityNotFoundException) {
+                _notice.value = "No app on this phone opens this kind of file."
+            }
+        }
+    }
+
+    /** Sets an agent's or group's photo from a picture on the phone, cropped square. */
+    fun setPhoto(id: String, group: Boolean, uri: android.net.Uri) {
+        val resolver = getApplication<Application>().contentResolver
+        act("Photo updated.", then = { media.forget(hub().photoPath(id, group)) }) {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val src = resolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: throw IOException("Could not read this picture.")
+                val side = minOf(src.width, src.height)
+                val square = android.graphics.Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
+                val scaled = android.graphics.Bitmap.createScaledBitmap(square, minOf(side, 640), minOf(side, 640), true)
+                java.io.ByteArrayOutputStream().also { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
+            }
+            setPhoto(id, group, bytes)
+        }
+    }
+
+    fun removePhoto(id: String, group: Boolean) = act("Photo removed.", then = { media.forget(hub().photoPath(id, group)) }) { removePhoto(id, group) }
+
     // Live events
 
     private fun onEvent(e: HubEvent) {
@@ -356,6 +625,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 if (_chat.value?.id == m.room) markSeen()
+                if (m.sender != "you" && m.sender != "mace" && m.kind != "system") sounds.received()
                 refreshSoon()
             }
             "activity" -> {
@@ -394,6 +664,15 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun memberOf(id: String): Member? = members[id]
 
+    /** The photo of a conversation: the group's, or the agent's. */
+    fun photoOf(id: String): String? = groups[id]?.let { media.groupPhotoUrl(id, it.photo) } ?: members[id]?.let { media.avatarUrl(it) }
+
+    /** The role an agent works as in a group: set by the owner, chosen by the agent, or its own. */
+    fun roleOf(room: String, member: String): String =
+        groups[room]?.roles?.get(member)?.takeIf { it.isNotBlank() } ?: groups[room]?.claimed?.get(member)?.takeIf { it.isNotBlank() } ?: members[member]?.role.orEmpty()
+
+    private fun membersIds(id: String): List<String> = groups[id]?.members ?: listOf(id)
+
     private fun membersOf(id: String): List<Member> =
         (groups[id]?.members ?: listOf(id)).mapNotNull { members[it] }
 
@@ -406,8 +685,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             "mace", m.room -> ""
             else -> members[m.sender]?.let { "${it.name}: " }.orEmpty()
         }
-        val body = m.text.ifBlank { if (m.file.isNotEmpty()) "Shared ${m.file.trimEnd('/').substringAfterLast('/')}" else "" }
-        return (who + body).lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+        val body = m.text.lineSequence().filterNot { it.startsWith("> ") }.joinToString("\n").ifBlank {
+            when (io.github.phantomconartist.mace.ui.kindOf(m.file)) {
+                io.github.phantomconartist.mace.ui.FileKind.Image -> "📷 Photo"
+                io.github.phantomconartist.mace.ui.FileKind.Video -> "🎥 Video"
+                else -> if (m.file.isNotEmpty()) "📄 " + m.file.trimEnd('/').substringAfterLast('/') else ""
+            }
+        }
+        val line = body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+            .replace(Regex("""\[([^\]]+)\]\([^)]*\)"""), "$1").replace("`", "").replace("**", "")
+        return who + line
     }
 
     private fun explain(e: IOException): String = when (e) {
