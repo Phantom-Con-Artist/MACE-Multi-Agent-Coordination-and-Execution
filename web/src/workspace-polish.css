@@ -1471,3 +1471,127 @@
   color: var(--text);
   font-size: var(--font-small);
 }
+
+/* Activity as a timeline: time, a mark on a rail, then what happened. */
+.app .page .search {
+  margin-inline: 0;
+}
+.app .audit-list details {
+  position: relative;
+  border-bottom: 0;
+}
+.app .audit-list details::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 89.5px;
+  width: 1px;
+  background: var(--line);
+}
+.app .audit-list details:first-child::before {
+  top: 26px;
+}
+.app .audit-list details:last-child:not([open])::before {
+  bottom: calc(100% - 26px);
+}
+.app .audit-list summary {
+  display: grid;
+  grid-template-columns: 64px 28px minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+.app .audit-list summary::-webkit-details-marker {
+  display: none;
+}
+.event-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.app .audit-list details[open] .event-mark,
+.app .audit-list summary:hover .event-mark {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.event-details {
+  position: relative;
+  margin: 0 0 14px 104px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--soft);
+  font-size: var(--font-small);
+}
+.page .event-details > div {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) minmax(0, 1fr);
+  gap: 12px;
+  padding: 3px 0;
+  border-bottom: 0;
+  font-size: inherit;
+}
+.page .event-details dt {
+  color: var(--muted);
+}
+.page .event-details dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .app .audit-list summary {
+    grid-template-columns: 64px 28px minmax(0, 1fr);
+  }
+  .app .audit-list summary > .event-mark {
+    grid-row: span 2;
+  }
+  .app .audit-list summary > small {
+    grid-column: 3;
+  }
+  .event-details {
+    margin-left: 0;
+  }
+}
+
+/* An on/off switch: the knob slides, the track fills with the accent. */
+.app .switch-track {
+  flex: none;
+  position: relative;
+  width: 52px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color 180ms var(--ease-out);
+}
+.app .switch-track > span {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--surface);
+  transition: transform 220ms var(--ease-back);
+}
+.app .switch-track[aria-checked="true"] {
+  background: var(--accent);
+}
+.app .switch-track[aria-checked="true"] > span {
+  transform: translateX(20px);
+}
+@media (max-width: 760px) {
+  .app .setting.devices ul {
+    align-self: stretch;
+    max-width: none;
+  }
+}

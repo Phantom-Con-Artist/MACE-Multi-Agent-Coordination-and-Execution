@@ -35,11 +35,11 @@ const sections = [
 const guide = [
   [
     "Your first conversation",
-    "Open the workspace, tap + in Chats, and choose an installed agent. Mace looks for Codex, Claude Code, Antigravity, and Muse. Each agent uses its existing login and permissions on the host. New agents start in root /. Choose Change to browse to a different folder before starting.",
+    "Open the workspace, tap + in Chats, and choose an installed agent. MACE looks for Codex, Claude Code, Antigravity, and Muse. Each agent uses its existing login and permissions on the host. New agents start in root /. Choose Change to browse to a different folder before starting.",
   ],
   [
     "Choose where an agent works",
-    "Use the folder picker before starting an agent. You can also browse Host files and choose Start agent here. The folder determines where the native CLI runs. Access is limited by the host operating system and the account running Mace.",
+    "Use the folder picker before starting an agent. You can also browse Host files and choose Start agent here. The folder determines where the native CLI runs. Access is limited by the host operating system and the account running MACE.",
   ],
   [
     "Put agents in a group",
@@ -58,8 +58,8 @@ const guide = [
     "Host files lets you browse folders, read text, preview pictures, and play supported audio or video. When an agent links a file in its reply, tap it to open it. Open an app launches an installed application on the host desktop; its window is not yet streamed to your browser. Activity shows launch results and process output.",
   ],
   [
-    "Connect another Mace host",
-    "Run Mace on the other computer, then open Connected hosts and enter its address and access token. Its agents can join your groups. Attachments are transferred with a checksum check, up to 32 MiB per file. Both hosts need a working network connection.",
+    "Connect another MACE host",
+    "Run MACE on the other computer, then open Connected hosts and enter its address and access token. Its agents can join your groups. Attachments are transferred with a checksum check, up to 32 MiB per file. Both hosts need a working network connection.",
   ],
 ];
 const issues = [
@@ -69,11 +69,11 @@ const issues = [
   ],
   [
     "The access token does not work",
-    "Use the sign-in link printed by the currently running server. A manually configured MACE_AUTH_SECRET overrides the saved token. If you change it, stop and restart Mace, then open its new link. The token belongs to the host you are connecting to.",
+    "Use the sign-in link printed by the currently running server. A manually configured MACE_AUTH_SECRET overrides the saved token. If you change it, stop and restart MACE, then open its new link. The token belongs to the host you are connecting to.",
   ],
   [
     "My agent is not in the list",
-    "Install a supported CLI on the host and check that its executable is on the PATH used to start Mace. Finish its normal sign-in process on the host. Restart Mace if you changed PATH. The Configuration page shows which supported agents are detected.",
+    "Install a supported CLI on the host and check that its executable is on the PATH used to start MACE. Finish its normal sign-in process on the host. Restart MACE if you changed PATH. The Configuration page shows which supported agents are detected.",
   ],
   [
     "An agent failed or did not reply",
@@ -329,7 +329,7 @@ export default function PublicSite({
               <div className="about-copy">
                 <h2>Work on the machine you already have.</h2>
                 <p>
-                  Mace puts the CLI agents, files, and apps on your host within
+                  MACE puts the CLI agents, files, and apps on your host within
                   reach of a browser. Use your phone, laptop, or another
                   computer to continue working with that host.
                 </p>
@@ -368,7 +368,7 @@ export default function PublicSite({
                 <p>
                   Live agent behavior depends on the CLI installed on your host.
                   Desktop apps need a graphical host session. Media formats
-                  depend on your browser. Mace launches host apps, but does not
+                  depend on your browser. MACE launches host apps, but does not
                   stream a remote desktop.
                 </p>
               </div>
@@ -477,7 +477,7 @@ function Docs() {
       <section>
         <h2>Agent adapters</h2>
         <p>
-          Mace discovers Codex, Claude Code, Antigravity, and Muse on PATH. It
+          MACE discovers Codex, Claude Code, Antigravity, and Muse on PATH. It
           invokes each CLI in its native headless mode, provides recent
           conversation context, and stores the resulting response. Provider
           login, permissions, and availability come from that CLI. There is no

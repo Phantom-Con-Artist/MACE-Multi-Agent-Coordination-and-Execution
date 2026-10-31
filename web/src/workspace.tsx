@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 const AgentMessage = lazy(() => import("./agent-message"));
 import { StepList, WorkCard, type Step } from "./agent-work";
 import { MaceLogo, MaceMark, WorkingPills } from "./brand";
-import { ActivityBars, MachineCard, usePeerMetrics, type Sample } from "./charts";
+import { ActivityBars, EventDetails, EventIcon, MachineCard, actorLabel, eventTitle, usePeerMetrics, type Sample } from "./charts";
 
 function PeerMachine({ id, name }: { id: string; name: string }) {
   const { history, error } = usePeerMetrics(id, true);
@@ -169,7 +169,7 @@ store("mace-device", deviceID);
 const full = (p: string) => (p === "." ? "/" : "/" + p.replace(/^\/+/, ""));
 const clock = (s: string) =>
   new Date(s).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const readableError=(error:unknown)=>{const message=(error as Error).message||String(error);if(/dial tcp|connection refused|no such host|i\/o timeout/.test(message))return 'Could not reach that host. Check its address and make sure Mace is running there.';if(/Failed to fetch|NetworkError|Load failed/.test(message))return 'The host is unavailable. Your draft is kept. Check the connection and try again.';if(/^unauthorized$/i.test(message.trim()))return 'That access token was not accepted. Use the token printed by the running host.';return message};
+const readableError=(error:unknown)=>{const message=(error as Error).message||String(error);if(/dial tcp|connection refused|no such host|i\/o timeout/.test(message))return 'Could not reach that host. Check its address and make sure MACE is running there.';if(/Failed to fetch|NetworkError|Load failed/.test(message))return 'The host is unavailable. Your draft is kept. Check the connection and try again.';if(/^unauthorized$/i.test(message.trim()))return 'That access token was not accepted. Use the token printed by the running host.';return message};
 const statusLabel = (status: string) =>
   (
     ({
@@ -356,7 +356,7 @@ export default function Workspace() {
     setModal("preview");
   };
   const name = (id: string) =>
-    id === "you" ? "You" : id==='mace'?'Mace':all.find((a) => a.id === id)?.name || id;
+    id === "you" ? "You" : id==='mace'?'MACE':all.find((a) => a.id === id)?.name || id;
   const nav = (p: string) => {
     location.hash = p;
     setPage(p);
@@ -955,7 +955,7 @@ export default function Workspace() {
   return (
     <div className="app">
       <nav className="rail" aria-label="Main navigation">
-        <a className="brand" href="#home" aria-label="Mace home">
+        <a className="brand" href="#home" aria-label="MACE home">
           <MaceMark title="MACE home" inverse />
         </a>
         <div className="navlinks">
@@ -1692,10 +1692,9 @@ export default function Workspace() {
                       </div>
                     </div>
                   ))}
-                <p className="muted">
-                  Desktop apps need an active host desktop session. Check
-                  Activity for launch results.
-                </p>
+                {agents.every((a) => a.status === "removed") && (
+                  <p className="muted">No agents running on this host.</p>
+                )}
               </>
             ) : page === "files" ? (
               <>
@@ -1732,7 +1731,7 @@ export default function Workspace() {
               <>
                 <h1>Host apps.</h1>
                 <p className="lede">
-                  Click an app to open it on your host desktop.
+                  Click an app to open it on your host desktop. A desktop session must be signed in; results appear in Activity.
                 </p>
                 <label className="search">
                   <Search size={18} />
@@ -1886,18 +1885,11 @@ export default function Workspace() {
                           <details key={a.id}>
                             <summary>
                               <time>{clock(a.at)}</time>
-                              <span>
-                                {a.action.replaceAll("_", " ").toLowerCase()}
-                              </span>
-                              <small>{name(a.actor)}</small>
+                              <EventIcon action={a.action} />
+                              <span>{eventTitle(a.action)}</span>
+                              <small>{actorLabel(a.actor, name)}</small>
                             </summary>
-                            <pre>
-                              {JSON.stringify(
-                                { target: a.target, details: a.details },
-                                null,
-                                2,
-                              )}
-                            </pre>
+                            <EventDetails target={a.target} details={a.details} />
                           </details>
                         ))}
                     </div>
@@ -1922,7 +1914,7 @@ export default function Workspace() {
                       >
                         <Terminal size={16} />
                         <span>{p.name}</span>
-                        <small>{p.status}</small>
+                        <small>{statusLabel(p.status)}</small>
                         <ChevronRight size={16} />
                       </button>
                     ))}
@@ -2006,18 +1998,19 @@ export default function Workspace() {
                     <p>A quiet pattern of the MACE shapes behind conversations.</p>
                   </div>
                   <button
-                    className="secondary"
+                    className="switch-track"
                     role="switch"
                     aria-checked={wallpaper}
+                    aria-label="Chat wallpaper"
                     onClick={() => setWallpaperOn(!wallpaper)}
                   >
-                    {wallpaper ? "Pattern on" : "Plain"}
+                    <span />
                   </button>
                 </section>
                 <section className="setting">
                   <div>
                     <h2>Other machines</h2>
-                    <p>Connect using the address and token printed by Mace.</p>
+                    <p>Connect using the address and token printed by MACE.</p>
                   </div>
                   <button className="secondary" onClick={() => nav("hosts")}>
                     Manage hosts
@@ -2119,7 +2112,7 @@ export default function Workspace() {
                     "Run mace start on another machine, then add its address and access token in Connected hosts. Add its agents to groups. Local agents share paths directly; remote attachments transfer with SHA-256 verification, up to 32 MiB per file.",
                   ],
                   [
-                    "Stop Mace",
+                    "Stop MACE",
                     "Use mace stop for graceful shutdown or mace kill to force it. History stays on the host.",
                   ],
                 ].map(([h, p]) => (
@@ -2151,7 +2144,7 @@ export default function Workspace() {
                     <h3>Pick an agent</h3>
                     <p>Choose from CLI agents installed on your host.</p>
                     <h3>Bring a team</h3>
-                    <p>Group agents from this machine or another Mace host.</p>
+                    <p>Group agents from this machine or another MACE host.</p>
                     <h3>Follow the work</h3>
                     <p>
                       Conversations, process logs, and file transactions stay

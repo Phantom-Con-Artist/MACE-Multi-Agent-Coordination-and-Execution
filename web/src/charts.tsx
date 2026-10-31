@@ -1,7 +1,7 @@
 // Small SVG charts drawn in theme colors. A charting library would add far
 // more weight than a phone needs for gauges, sparklines, and a bar strip.
 import { useEffect, useState } from "react";
-import { Cpu, HardDrive, MemoryStick, Gauge, MonitorCog } from "lucide-react";
+import { Activity, AppWindow, Bot, Cpu, FileText, Gauge, HardDrive, MemoryStick, MessageSquare, MonitorCog, Network, Pause, Terminal, Users } from "lucide-react";
 
 export type Sample = {
   at: string;
@@ -94,7 +94,9 @@ export function MachineCard({ name, history, error }: { name: string; history: S
             <Ring value={s.disk} label="Disk" detail="Root filesystem" icon={HardDrive} />
           </div>
           <div className="machine-trend">
-            <small>CPU, last {Math.max(1, Math.round((history.length * 5) / 60))} min</small>
+            <small>
+              CPU, last {Math.max(1, Math.round((history.length * 5) / 60))} min · peak {Math.round(Math.max(...history.map((h) => h.cpu)))}%
+            </small>
             <Spark values={history.map((h) => h.cpu)} label="CPU over the last minutes" />
           </div>
         </>
@@ -154,5 +156,60 @@ export function ActivityBars({ times }: { times: string[] }) {
         <span>Now</span>
       </figcaption>
     </figure>
+  );
+}
+
+/** "CONVERSATION_COMPLETED" reads as "Conversation completed". */
+export const eventTitle = (action: string) => {
+  const t = action.replaceAll("_", " ").toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+// Host-side actors are internal parts of MACE; show them as MACE.
+const hostActors = new Set(["mace", "orchestrator", "supervisor"]);
+export const actorLabel = (actor: string, name: (id: string) => string) =>
+  hostActors.has(actor) ? "MACE" : actor === "peer" ? "Connected host" : name(actor);
+
+/** A small mark on the timeline rail for each kind of event. */
+export function EventIcon({ action }: { action: string }) {
+  const a = action.toUpperCase();
+  const Icon = a.startsWith("FILE")
+    ? FileText
+    : a.startsWith("PAUSE") || a.includes("_PAUSE")
+      ? Pause
+      : a.startsWith("PROCESS")
+        ? Terminal
+        : a.startsWith("HOST")
+          ? AppWindow
+          : a.startsWith("PEER") || a.startsWith("REMOTE")
+            ? Network
+            : a.startsWith("GROUP") || a.startsWith("MEMBER")
+              ? Users
+              : a.startsWith("AGENT") || a.startsWith("START")
+              ? Bot
+              : a.startsWith("CONVERSATION") || a.startsWith("TURN") || a.startsWith("MESSAGE") || a.startsWith("SESSION")
+                ? MessageSquare
+                : Activity;
+  return (
+    <span className="event-mark" aria-hidden="true">
+      <Icon size={14} />
+    </span>
+  );
+}
+
+/** An event's target and details as a wrapped list, readable on a phone. */
+export function EventDetails({ target, details }: { target?: string; details?: unknown }) {
+  const extra = details && typeof details === "object" ? (details as Record<string, unknown>) : { details };
+  const rows = Object.entries({ target, ...extra }).filter(([, v]) => v !== undefined && v !== null && v !== "");
+  if (!rows.length) return <p className="event-details muted">No further details.</p>;
+  return (
+    <dl className="event-details">
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <dt>{eventTitle(k)}</dt>
+          <dd>{typeof v === "object" ? JSON.stringify(v) : String(v)}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
