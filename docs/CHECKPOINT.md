@@ -38,7 +38,9 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 ## Next, when this work resumes
 
-Orchestration (owner priority): workers see less (plan, messages to them, lead broadcasts); lead takeover when the lead is unavailable; swipe-to-reply to target an agent; a pinned plan card; screenshot sharing instructions and a web preview link; Live View later. The brief-then-divide lead behavior has tests but no live run yet. The test hub (port 18100, phone-signed) keeps its data in this session's scratchpad; move it if it must survive.
+Orchestration (owner priority): workers see less (plan, messages to them, lead broadcasts); lead takeover when the lead is unavailable; swipe-to-reply to target an agent; a pinned plan card; screenshot sharing instructions and a web preview link; Live View later. Last live session (2026-10-31, evening): an isolated hub (agy, in ~/Development/mace-playground, the codebase) and worker (Muse, in an empty ~/Development/mace-worker) ran on this laptop's tailnet address, ports 18200 and 18201, joined as nodes and connected with the older peer link so the remote Muse could sit in a hub group. Given "build a scientific calculator web app", agy as lead did the briefing step live: one short confirmation of goal, scope, and done, then waited for the owner. The owner's answer, the plan, and the first cross-host [share:] handoff to the worker were not reached. All test servers were stopped; their state lived in the session scratchpad and is gone. The playground repo was reset to its seed commit before that run.
+
+Open issues seen: a group with a remote member still needs the older peer link (node routing is part of hub step 4); the start banner prints a 127.0.0.1 link even when the server binds only to the tailnet address.
 
 
 Follow the build order in docs/DESIGN-HUB-WORKER.md:
