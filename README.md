@@ -29,6 +29,8 @@ Mace stops agent work when you are gone. Every signed-in browser checks in every
 
 Pause everything, in the workspace banner or with `mace pause-all`, stops all agent work on this host and on connected hosts. Desktop apps are never stopped. A host restart also marks running work Interrupted, so nothing resumes on its own.
 
+Each agent has a name, an @mention name, a role, and an avatar color. Change them from the agent's private chat menu under Name, mention and role. The role goes with the agent into every group unless a group assigns its own. Claude Code and Muse avatars use their own marks. For other agents, place an official logo you may use at avatars/<provider>.svg (or .png, .webp) in the Mace state folder, for example ~/.config/mace/avatars/agy.svg.
+
 Each browser keeps its own sign-in. Settings lists signed-in devices and lets you remove one. Changing the access token signs out every device.
 
 Host provides file browsing, text/media inspection, desktop app discovery and launch, and agent controls. Activity shows conversation state, audit events, native stdout/stderr, and file transactions.

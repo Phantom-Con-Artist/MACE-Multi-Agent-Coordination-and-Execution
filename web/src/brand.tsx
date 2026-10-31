@@ -124,14 +124,22 @@ export function WorkingPills({ label }: { label?: string }) {
 }
 
 /** One tile of the mark, used for agent and group avatars. */
-export function MaceTile({ letter, inverse = false }: { letter: string; inverse?: boolean }) {
+export function MaceTile({
+  letter,
+  inverse = false,
+  glyph = false,
+}: {
+  letter: string;
+  inverse?: boolean;
+  glyph?: boolean;
+}) {
   const id = "mace-tile-" + uid++;
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       aria-hidden="true"
       preserveAspectRatio="xMidYMid slice"
-      className={"mace-logo mace-tile" + (inverse ? " inverse" : "")}
+      className={"mace-logo mace-tile" + (inverse ? " inverse" : "") + (glyph ? " glyph" : "")}
     >
       <Tile letter={letter} x={0} id={id} />
     </svg>

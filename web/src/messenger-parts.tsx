@@ -1,17 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { MaceTile } from "./brand";
 
-// Agents get a tile from the MACE mark: the triangle of their provider's
-// initial where it exists in M-A-C-E, the E tile (message pills) for groups.
-// Tile and shape colors alternate by identity so a list never looks uniform.
-const letterFor = (provider?: string, group?: boolean) =>
-  group
-    ? "E"
-    : ({ muse: "M", agy: "A", codex: "C", claude: "C", diagnostic: "E" } as Record<string, string>)[
-        provider || ""
-      ] || "A";
+// Avatars: the agent's own mark where Mace may ship it (Claude Code, Muse), a
+// logo the owner provided, or otherwise the MACE tile of its initial. Groups
+// get the E tile, whose pills read as people talking. Each instance has a
+// color profile, so agy and agy-2 are easy to tell apart.
+export const colorProfiles = ["Red", "Ink", "Paper", "Maroon", "Blush", "Charcoal"];
+const shipped: Record<string, string> = { claude: "/agents/claude.svg", muse: "/agents/muse.svg" };
+const letterFor = (provider?: string) =>
+  ({ muse: "M", agy: "A", codex: "C", claude: "C", diagnostic: "E" } as Record<string, string>)[provider || ""] || "A";
 
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+// Instance order: red first, then the most distinct neighbors, ink last
+// because it disappears on dark themes.
+const instanceOrder = [0, 2, 3, 4, 5, 1];
+
+/** The default profile follows the instance number in the handle: agy, agy-2, agy-3. */
+export function profileFor(color: number | undefined | null, handle: string | undefined, _id: string) {
+  if (color !== undefined && color !== null) return color;
+  const n = /-(\d+)$/.exec(handle || "");
+  return instanceOrder[((n ? Number(n[1]) : 1) - 1) % instanceOrder.length];
+}
 
 export function Avatar({
   id,
@@ -19,20 +29,36 @@ export function Avatar({
   group = false,
   size = 44,
   working = false,
+  color,
+  handle,
+  ownerLogo = false,
 }: {
   id: string;
   provider?: string;
   group?: boolean;
   size?: number;
   working?: boolean;
+  color?: number;
+  handle?: string;
+  ownerLogo?: boolean;
 }) {
+  const profile = group ? hash(id) % 2 : profileFor(color, handle, id);
+  const mark = !group && provider ? shipped[provider] : undefined;
   return (
     <span
-      className={"tile-avatar" + (working ? " working" : "")}
+      className={"agent-avatar profile-" + profile + (working ? " working" : "")}
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <MaceTile letter={letterFor(provider, group)} inverse={hash(id) % 2 === 1} />
+      {group ? (
+        <MaceTile letter="E" inverse={profile === 1} />
+      ) : ownerLogo && provider ? (
+        <img src={"/api/v1/avatars/" + provider} alt="" />
+      ) : mark ? (
+        <i className="agent-mark" style={{ maskImage: `url(${mark})`, WebkitMaskImage: `url(${mark})` }} />
+      ) : (
+        <MaceTile letter={letterFor(provider)} glyph />
+      )}
     </span>
   );
 }

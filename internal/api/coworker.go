@@ -45,7 +45,11 @@ func (h *APIHandler) awareness(ctx context.Context, s Session) string {
 	if model == "" {
 		model = "the CLI default"
 	}
-	fmt.Fprintf(&b, "MACE AWARENESS: You are %s (@%s) on host %s. Model: %s. Working folder: %s.\nYour conversations:\n", limited(s.Name, 120), s.Handle, host, model, s.Directory)
+	fmt.Fprintf(&b, "MACE AWARENESS: You are %s (@%s) on host %s. Model: %s. Working folder: %s.\n", limited(s.Name, 120), s.Handle, host, model, s.Directory)
+	if s.Role != "" {
+		fmt.Fprintf(&b, "Your role, set by the owner: %s. A group may assign you a different role there.\n", limited(s.Role, 600))
+	}
+	b.WriteString("Your conversations:\n")
 	fmt.Fprintf(&b, "- Private chat with the owner.%s\n", h.latest(ctx, s.ID))
 	raw, _ := h.store.Documents(ctx, "room")
 	listed := 0
@@ -67,6 +71,15 @@ func (h *APIHandler) awareness(ctx context.Context, s Session) string {
 		fmt.Fprintf(&b, "- Group %q with %s (%s mode).%s\n", limited(g.Name, 80), strings.Join(names, ", "), mode, h.latest(ctx, g.ID))
 	}
 	return b.String() + conventions
+}
+
+// profileRole is the role an agent carries into every conversation.
+func (h *APIHandler) profileRole(ctx context.Context, id string) string {
+	var s Session
+	if h.store.Document(ctx, "session", id, &s) == nil || h.store.Document(ctx, "remote-session", id, &s) == nil {
+		return strings.TrimSpace(s.Role)
+	}
+	return ""
 }
 
 func containsID(list []string, id string) bool {
@@ -129,6 +142,9 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 				break
 			}
 			role := strings.TrimSpace(group.Roles[other])
+			if role == "" {
+				role = h.profileRole(ctx, other)
+			}
 			if role == "" {
 				role = "Unassigned. Responsibilities may emerge naturally."
 			}

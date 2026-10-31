@@ -1,0 +1,8 @@
+claude.svg (Claude Code) and muse.svg (Meta AI) come from Simple Icons
+(https://simpleicons.org, version 16.36.0), whose SVG data is released under CC0 1.0.
+The marks are trademarks of their owners and are used only to identify the
+installed command-line agent each avatar represents.
+
+Mace ships no Antigravity or Codex mark. Place an official logo you have the
+right to use at <Mace state folder>/avatars/<provider>.svg (or .png, .webp),
+for example ~/.config/mace/avatars/agy.svg, and Mace shows it instead.

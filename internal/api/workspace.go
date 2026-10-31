@@ -13,11 +13,18 @@ import (
 )
 
 type Session struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Handle    string `json:"handle,omitempty"`
-	Provider  string `json:"provider"`
-	Model     string `json:"model,omitempty"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Handle   string `json:"handle,omitempty"`
+	Provider string `json:"provider"`
+	Model    string `json:"model,omitempty"`
+	// Role is the agent's own role. It applies in every conversation unless a
+	// group assigns a role of its own.
+	Role string `json:"role,omitempty"`
+	// Color picks the avatar's color profile; nil means chosen by instance.
+	Color *int `json:"color,omitempty"`
+	// Avatar reports a logo the owner provided for this agent's provider.
+	Avatar    bool   `json:"avatar,omitempty"`
 	Directory string `json:"working_dir"`
 	Status    string `json:"status"`
 	// NativeSession is the CLI's own session ID, shared by every conversation
@@ -54,7 +61,15 @@ func (h *APIHandler) sessions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, e.Error(), 500)
 			return
 		}
-		writeJSON(w, 200, v)
+		out := make([]Session, 0, len(v))
+		for _, b := range v {
+			var s Session
+			if json.Unmarshal(b, &s) == nil {
+				s.Avatar = ownerAvatar(s.Provider) != ""
+				out = append(out, s)
+			}
+		}
+		writeJSON(w, 200, out)
 		return
 	}
 	var s Session

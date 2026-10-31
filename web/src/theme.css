@@ -927,3 +927,155 @@ html .app .threadhead .threadtitle {
     height: var(--viewport-height, 100dvh);
   }
 }
+
+/* ---------- Agent avatars ---------- */
+/* Six color profiles, all from the brand: red, ink, paper, maroon, blush,
+   charcoal. Instances of one agent take different profiles by default. */
+.profile-0 { --av-bg: #a20000; --av-fg: #fff4ef; }
+.profile-1 { --av-bg: #120d0e; --av-fg: #e0251c; }
+.profile-2 { --av-bg: #f4eee7; --av-fg: #171213; }
+.profile-3 { --av-bg: #5c0a06; --av-fg: #ffd2c7; }
+.profile-4 { --av-bg: #f7ddd6; --av-fg: #a20000; }
+.profile-5 { --av-bg: #3b3536; --av-fg: #f6f1ec; }
+.agent-avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 30%;
+  overflow: hidden;
+  background: var(--av-bg);
+  color: var(--av-fg);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.06);
+}
+.agent-avatar .agent-mark {
+  display: block;
+  width: 56%;
+  height: 56%;
+  background: var(--av-fg);
+  -webkit-mask: no-repeat center / contain;
+  mask: no-repeat center / contain;
+}
+.agent-avatar img {
+  width: 64%;
+  height: 64%;
+  object-fit: contain;
+}
+.agent-avatar .mace-tile {
+  width: 100%;
+  height: 100%;
+}
+/* Agents without a shipped mark show their MACE letter in the profile colors. */
+.agent-avatar .mace-tile.glyph .logo-bg,
+.agent-avatar .mace-tile.glyph .logo-pill {
+  fill: var(--av-bg);
+}
+.agent-avatar .mace-tile.glyph .logo-shape polygon {
+  fill: var(--av-fg);
+  stroke: var(--av-fg);
+}
+.agent-avatar.working::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: inset 0 0 0 3px var(--accent);
+  animation: live 1.4s var(--ease-in-out) infinite;
+}
+
+/* Profile editor */
+.profile-form {
+  display: grid;
+  gap: 14px;
+}
+.profile-form .profile-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.profile-form .profile-preview strong {
+  display: block;
+  font-size: 1.05rem;
+}
+.profile-form .profile-preview small {
+  color: var(--green);
+  font-weight: 650;
+}
+.profile-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+  font-size: var(--font-label, 0.875rem);
+}
+.profile-form input,
+.profile-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  font-weight: 400;
+}
+.profile-form .prefixed {
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+  padding-left: 12px;
+  color: var(--muted);
+}
+.profile-form .prefixed input {
+  border: 0;
+  padding-left: 2px;
+}
+.profile-form .hint {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: var(--font-small, 0.75rem);
+}
+.profile-form .swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.profile-form .swatches legend {
+  font-weight: 600;
+  font-size: var(--font-label, 0.875rem);
+  margin-bottom: 6px;
+}
+.profile-form .swatch {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--av-bg) 55%, var(--av-fg) 55%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.1);
+  transition: transform 180ms var(--ease-back);
+}
+.profile-form .swatch[aria-pressed="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  transform: scale(1.08);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-avatar.working::after {
+    animation: none;
+  }
+}
+
+html[data-theme="dark"] .agent-avatar {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+.profile-form label,
+.profile-form p {
+  margin: 0;
+}

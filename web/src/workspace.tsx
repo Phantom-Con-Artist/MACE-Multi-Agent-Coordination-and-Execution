@@ -19,6 +19,8 @@ import {
   dayLabel,
   listTime,
   plainPreview,
+  colorProfiles,
+  profileFor,
   useMentionMenu,
   type Suggestion,
 } from "./messenger-parts";
@@ -72,6 +74,9 @@ type Agent = {
   name: string;
   handle?: string;
   model?: string;
+  role?: string;
+  color?: number;
+  avatar?: boolean;
   provider?: string;
   status: string;
   working_dir: string;
@@ -254,6 +259,7 @@ export default function Workspace() {
     [groupMembers, setGroupMembers] = useState<string[]>([]),
     [unread, setUnread] = useState(false),
     [roleMember,setRoleMember]=useState(''),[roleDraft,setRoleDraft]=useState(''),
+    [profileDraft, setProfileDraft] = useState({ name: "", handle: "", role: "", color: 0 }),
     [policy, setPolicy] = useState<Policy>({
       mode: "reply",
       goal: "",
@@ -333,6 +339,11 @@ export default function Workspace() {
   };
   // Group members keep one name tone, so speakers are easy to tell apart.
   const senderTone = (id: string) => ((room?.members.indexOf(id) ?? 0) % 4) + 1;
+  // Everything an avatar needs to look like this particular agent.
+  const look = (id: string) => {
+    const a = all.find((x) => x.id === id);
+    return { id, provider: a?.provider, color: a?.color, handle: a?.handle, ownerLogo: !!a?.avatar };
+  };
   const openFile = (path: string) => {
     setPreview(path);
     setModal("preview");
@@ -1134,12 +1145,7 @@ export default function Workspace() {
                         key={c.id}
                         onClick={() => select(c.id)}
                       >
-                        <Avatar
-                          id={c.id}
-                          provider={(c as Agent).provider}
-                          group={group}
-                          working={busyHere.length > 0}
-                        />
+                        <Avatar {...look(c.id)} group={group} working={busyHere.length > 0} />
                         <div className="chatcopy">
                           <div>
                             <strong>{c.name}</strong>
@@ -1206,13 +1212,7 @@ export default function Workspace() {
                     >
                       <ArrowLeft />
                     </button>
-                    <Avatar
-                      id={chat.id}
-                      provider={(chat as Agent).provider}
-                      group={!!room}
-                      size={40}
-                      working={working.length > 0}
-                    />
+                    <Avatar {...look(chat.id)} group={!!room} size={40} working={working.length > 0} />
                     <div className="threadtitle">
                       <strong>{chat.name}</strong>
                       <small title={chat.working_dir}>
@@ -1425,7 +1425,7 @@ export default function Workspace() {
                           {p.id === "all" ? (
                             <span className="all-icon"><AtSign size={18} /></span>
                           ) : (
-                            <Avatar id={p.id} provider={p.provider} size={30} />
+                            <Avatar {...look(p.id)} size={30} />
                           )}
                           <span>
                             <strong>@{p.handle}</strong>
@@ -2176,7 +2176,8 @@ export default function Workspace() {
               more: "More",
               logs: "Native process log",
               transfer: "Send file",
-              role:'Assign a role',
+              role:'Role in this group',
+              profile: "Name, mention and role",
             }[modal] || modal
           }
           close={() => {
@@ -2352,6 +2353,24 @@ export default function Workspace() {
           ) : modal === "details" ? (
             <>
               <p>{chat?.name}</p>
+              {!room && chat && all.some((a) => a.id === chat.id) && (
+                <button
+                  className="control-row"
+                  onClick={() => {
+                    const a = all.find((x) => x.id === chat.id)!;
+                    setProfileDraft({
+                      name: a.name,
+                      handle: a.handle || "",
+                      role: a.role || "",
+                      color: profileFor(a.color, a.handle, a.id),
+                    });
+                    setModal("profile");
+                  }}
+                >
+                  <Pencil size={18} />
+                  Name, mention and role
+                </button>
+              )}
               <button
                 className="control-row"
                 onClick={() => setModal("policy")}
@@ -2372,7 +2391,7 @@ export default function Workspace() {
                     <div className="member-row" key={id}>
                       <span>
                         {name(id)}
-                        <button className="member-role" aria-label={'Assign role to '+name(id)} onClick={()=>{setRoleMember(id);setRoleDraft(room.roles?.[id]||'');setModal('role')}}>{room.roles?.[id]||'No assigned role'}<Pencil size={14}/></button>
+                        <button className="member-role" aria-label={'Assign role to '+name(id)} onClick={()=>{setRoleMember(id);setRoleDraft(room.roles?.[id]||'');setModal('role')}}>{room.roles?.[id]||(all.find(a=>a.id===id)?.role?'Own role: '+all.find(a=>a.id===id)!.role:'No assigned role')}<Pencil size={14}/></button>
                       </span>
                       <button
                         aria-label={"Stop " + name(id)}
@@ -2460,8 +2479,82 @@ export default function Workspace() {
                 <p>Manage remote lifecycle on its host.</p>
               )}
             </>
+          ) : modal === "profile" ? (
+            <form
+              className="profile-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void action(async () => {
+                  await api("/v1/sessions/" + encodeURIComponent(selected) + "/profile", profileDraft);
+                  await refresh();
+                  setModal("");
+                  setNotice("Saved. Every conversation uses this on the next turn.");
+                });
+              }}
+            >
+              <div className="profile-preview">
+                <Avatar {...look(selected)} color={profileDraft.color} handle={profileDraft.handle} size={64} />
+                <div>
+                  <strong>{profileDraft.name || "Unnamed agent"}</strong>
+                  <small>@{profileDraft.handle || "handle"}</small>
+                </div>
+              </div>
+              <label>
+                Name
+                <input
+                  autoFocus
+                  required
+                  maxLength={60}
+                  value={profileDraft.name}
+                  onChange={(e) => setProfileDraft({ ...profileDraft, name: e.currentTarget.value })}
+                />
+              </label>
+              <label>
+                Mention as
+                <span className="prefixed">
+                  <span aria-hidden="true">@</span>
+                  <input
+                    required
+                    maxLength={32}
+                    pattern="[A-Za-z0-9._\-]+"
+                    title="Letters, numbers, dots, dashes, or underscores"
+                    value={profileDraft.handle}
+                    onChange={(e) => setProfileDraft({ ...profileDraft, handle: e.currentTarget.value.replace(/\s+/g, "-") })}
+                  />
+                </span>
+              </label>
+              <label>
+                Role
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="For example, review every change for security"
+                  value={profileDraft.role}
+                  onChange={(e) => setProfileDraft({ ...profileDraft, role: e.currentTarget.value })}
+                />
+              </label>
+              <p className="hint">
+                This role goes with the agent into every group. A group can give it a different role there.
+              </p>
+              <fieldset className="swatches">
+                <legend>Color</legend>
+                {colorProfiles.map((label, i) => (
+                  <button
+                    type="button"
+                    key={label}
+                    className={"swatch profile-" + i}
+                    aria-label={label}
+                    aria-pressed={profileDraft.color === i}
+                    onClick={() => setProfileDraft({ ...profileDraft, color: i })}
+                  />
+                ))}
+              </fieldset>
+              <button className="primary" disabled={busy}>
+                Save
+              </button>
+            </form>
           ) : modal === "role" ? (
-            <form onSubmit={event=>{event.preventDefault();void action(async()=>{await api('/v1/rooms/'+selected+'/members/'+encodeURIComponent(roleMember)+'/role',{role:roleDraft});await refresh();setModal('details')})}}><p>{name(roleMember)} is unassigned unless you give them a role. Coworkers can also find responsibilities naturally while they work.</p><label>Role (optional)<input autoFocus value={roleDraft} maxLength={2000} placeholder="For example, review the mobile layouts" onChange={event=>setRoleDraft(event.currentTarget.value)}/></label><p>Clear the field to leave this coworker unassigned. Changes apply on their next turn.</p><button className="primary" disabled={busy}>Save role</button></form>
+            <form onSubmit={event=>{event.preventDefault();void action(async()=>{await api('/v1/rooms/'+selected+'/members/'+encodeURIComponent(roleMember)+'/role',{role:roleDraft});await refresh();setModal('details')})}}><p>{all.find(a=>a.id===roleMember)?.role?<>In other conversations {name(roleMember)} works as: {all.find(a=>a.id===roleMember)!.role}. A role set here applies only in this group.</>:<>{name(roleMember)} is unassigned unless you give them a role. Coworkers can also find responsibilities naturally while they work.</>}</p><label>Role (optional)<input autoFocus value={roleDraft} maxLength={2000} placeholder="For example, review the mobile layouts" onChange={event=>setRoleDraft(event.currentTarget.value)}/></label><p>Clear the field to leave this coworker unassigned. Changes apply on their next turn.</p><button className="primary" disabled={busy}>Save role</button></form>
           ) : modal === "members" ? (
             <>
               {all

@@ -116,6 +116,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/sessions", handler.sessions)
 		r.Post("/sessions/{id}/turn", handler.remoteTurn)
 		r.Post("/sessions/{id}/control", handler.controlSession)
+		r.Post("/sessions/{id}/profile", handler.profile)
+		r.Get("/avatars/{provider}", handler.avatar)
 		r.Post("/rooms/{room}/members/{member}/remove", handler.removeMember)
 		r.Post("/rooms/{room}/remove", handler.removeGroup)
 		r.Delete("/rooms/{room}", handler.removeGroup)
