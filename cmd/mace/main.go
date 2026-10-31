@@ -322,7 +322,11 @@ func (c settings) start() error {
 		cleanup()
 		return e
 	}
-	bootstrap.Banner(token, c.Host, c.Port, c.Log)
+	// Under systemd this output goes to the journal, which administrators can
+	// read, so the token and links stay out of it; mace info prints them.
+	if os.Getenv("INVOCATION_ID") == "" {
+		bootstrap.Banner(token, c.Host, c.Port, c.Log)
+	}
 	fmt.Printf("Server ready (PID %d). State: %s\n", pid, c.State)
 	return nil
 }
@@ -530,7 +534,7 @@ func (c settings) doctor() error {
 }
 func help() {
 	bootstrap.Brand()
-	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
+	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  setup [--port 8080] [--remove]        Run MACE as a background service\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
 }
 func run(args []string) error {
 	command := "help"
@@ -561,6 +565,8 @@ func run(args []string) error {
 	switch command {
 	case "start":
 		return c.start()
+	case "setup":
+		return c.setup(args)
 	case "stop":
 		if portFlag(args) {
 			return c.stopPort(false)

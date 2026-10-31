@@ -24,7 +24,7 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 
 ## Architecture decision (2026-10-31)
 
-Hub and worker nodes, every node stores its own data, records named by content hash with per-node chains. See docs/DESIGN-HUB-WORKER.md. Its build order comes before the remaining phase 3 to 6 items, which it partly absorbs. Step 1 (records) is done and was checked on a copy of the owner's real database (20 messages, 6 conversations, backup taken, no duplicates on restart). Next: step 2, the worker user service.
+Hub and worker nodes, every node stores its own data, records named by content hash with per-node chains. See docs/DESIGN-HUB-WORKER.md. Its build order comes before the remaining phase 3 to 6 items, which it partly absorbs. Step 1 (records) is done and was checked on a copy of the owner's real database (20 messages, 6 conversations, backup taken, no duplicates on restart). Step 2 (worker service, `mace setup`) is done and was checked on real systemd with an isolated unit. Next: step 3, joining (node keys, `mace join`, QR code, discovery over Tailscale).
 
 ## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
 
