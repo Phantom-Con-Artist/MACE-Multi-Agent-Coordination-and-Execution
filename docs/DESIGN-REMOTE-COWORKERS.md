@@ -363,6 +363,20 @@ Done on branch `phase-0-hardening`, with tests: D1 to D6, D8 to D12, retention a
 
 Moved to phase 1, where the code they depend on is written: batched event inserts (rest of D7), the persisted per-agent inbox, and loop detection.
 
+## Status and remaining work (2026-10-31)
+
+Done and committed: phase 0 (hardening), phase 1 (parallel coworkers, shared native sessions, protocol v3, live tool steps), the brand overhaul (logo, palettes, messenger, public site with vector art), and agent profiles (names, handles, roles, colors, avatars). @ suggestions shipped with the messenger.
+
+Requested by the owner and still to do, in order:
+
+1. Machine monitoring: CPU, GPU, memory, disk, and load for every connected host, sampled on each host and streamed. Shown as small theme-aware SVG charts (sparklines, ring gauges) rather than a charting library, to keep the phone bundle small.
+2. Visual Host and Activity pages: activity as a timeline with charts instead of text lists; app launching from a visual grid.
+3. Phase 2 commands: `/` commands in private chats (model, folder, new session, status), model switching that applies everywhere.
+4. Phase 3 files: streaming viewer for any size, pdf.js, hex view, resumable transfers without the 32 MiB cap.
+5. The full CLI: animated logo and spinners, subcommands for agents, chats, apps, machines, and Live View, with plain output when not on a terminal.
+6. Phase 4 setup and phase 5 power, as designed.
+7. Phase 6 Live View and remote app streaming, from the browser and the CLI.
+
 ## Open questions
 
 - Antigravity conversation ID discovery in print mode. Resolved by the phase 1 spike.
