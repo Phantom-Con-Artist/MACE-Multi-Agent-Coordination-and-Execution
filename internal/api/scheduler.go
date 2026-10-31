@@ -28,6 +28,10 @@ import (
 
 const hopLimit = 8
 
+// teamHopLimit bounds agent-to-agent chains in a team, where the lead keeps
+// the work moving by handing off.
+const teamHopLimit = 40
+
 // Priorities: lower runs first.
 const (
 	priorityDirect = iota
@@ -408,17 +412,28 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 		}
 		if len(m.Mentions) > 0 {
 			targets = m.Mentions
+		} else if p.Mode == "team" && h.available(ctx, p.Lead) {
+			// In a team the lead takes the owner's unaddressed messages.
+			targets = []string{p.Lead}
 		} else {
 			targets = members
 		}
 	} else {
-		if m.Hop >= hopLimit && p.Mode != "continuous" {
-			h.systemNote(room, fmt.Sprintf("Agents handed the conversation to each other %d times in a row, so Mace stopped the chain here. Reply to keep going.", hopLimit))
+		limit := hopLimit
+		if p.Mode == "team" {
+			limit = teamHopLimit
+		}
+		if m.Hop >= limit && p.Mode != "continuous" {
+			h.systemNote(room, fmt.Sprintf("Agents handed the conversation to each other %d times in a row, so Mace stopped the chain here. Reply to keep going.", limit))
 			return nil
 		}
 		targets = append(targets, m.Mentions...)
 		if m.MentionsAll {
 			targets = members
+		}
+		// Workers report to the lead when they address no one.
+		if p.Mode == "team" && m.Sender != p.Lead && len(m.Mentions) == 0 && !m.MentionsAll {
+			targets = append(targets, p.Lead)
 		}
 	}
 	type pick struct {
@@ -491,6 +506,18 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 		h.sched.Unlock()
 		return nil
 	}
+	// A lead's [redirect] stops the work of the coworkers it names, so they
+	// pick up the new direction at once.
+	if p.Mode == "team" && m.Sender == p.Lead && m.Flair == "redirect" {
+		for _, c := range picks {
+			if q := h.queues[c.member]; q != nil {
+				q.queue = slices.DeleteFunc(q.queue, func(r *turnRequest) bool { return r.Room == room })
+				if q.running != nil && q.running.Room == room {
+					q.cancel(errSuperseded)
+				}
+			}
+		}
+	}
 	if len(picks) > 0 {
 		rr.run.Status, rr.run.Policy = "running", p
 	}
@@ -543,7 +570,7 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	h.sched.Lock()
 	rr := h.roomFor(req.Room)
 	current := req.Gen == rr.gen
-	if rr.closed && current || current && p.Mode != "continuous" && rr.run.Replies+rr.inflight >= p.Limit {
+	if rr.closed && current || current && p.Mode != "continuous" && p.Mode != "team" && rr.run.Replies+rr.inflight >= p.Limit {
 		if !rr.closed {
 			rr.limitHit = true
 		}
@@ -632,7 +659,7 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	if len(files) > 0 {
 		reply.File = files[0]
 	}
-	reply.Mentions, reply.MentionsAll = parseMentions(reply.Text, h.roomHandles(ctx, members))
+	reply.Mentions, reply.MentionsAll = h.roomMentions(ctx, req.Room, reply.Text, members)
 	if h.routeReply(ctx, group, req.Member, &reply) {
 		posted = true
 		h.sched.Lock()
@@ -663,8 +690,9 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		h.halt(req.Room, errGoalComplete, "goal_reported_complete")
 		return
 	}
-	if flair == "done" && p.Mode == "continuous" {
-		// "Until done" ends when an agent reports the request is done.
+	if flair == "done" && (p.Mode == "continuous" || p.Mode == "team" && req.Member == p.Lead) {
+		// "Until done" ends when an agent reports the request is done; a team
+		// ends only when its lead does.
 		h.halt(req.Room, errGoalComplete, "completed")
 		return
 	}

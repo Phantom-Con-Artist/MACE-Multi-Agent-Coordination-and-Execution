@@ -12,7 +12,7 @@ import (
 // can scan or filter a conversation by intent. A group may add a few custom
 // flairs of its own; every member sees the group's list each turn.
 
-var standardFlairs = []string{"question", "idea", "plan", "decision", "blocker", "done", "fyi"}
+var standardFlairs = []string{"question", "idea", "plan", "decision", "blocker", "done", "fyi", "redirect"}
 
 // reservedTags are protocol markers, never flairs.
 var reservedTags = []string{"pass", "goal_complete", "share", "dm", "group", "role"}

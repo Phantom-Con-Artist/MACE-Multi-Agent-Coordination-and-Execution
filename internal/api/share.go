@@ -178,7 +178,7 @@ func (h *APIHandler) routeReply(ctx context.Context, group *Room, member string,
 		}
 		out := *reply
 		out.ID, out.Room, out.Text = newID(), parent.ID, strings.TrimSpace(reply.Text[len(m):])
-		out.Mentions, out.MentionsAll = parseMentions(out.Text, h.roomHandles(ctx, parent.Members))
+		out.Mentions, out.MentionsAll = h.roomMentions(ctx, parent.ID, out.Text, parent.Members)
 		if _, err := h.postMessage(ctx, &out); err == nil {
 			h.dispatch(ctx, parent.ID, out)
 		}

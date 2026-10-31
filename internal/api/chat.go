@@ -194,7 +194,7 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 	m.Room = id
 	m.Kind, m.Wake, m.Activity, m.Seq = "", false, nil, 0
 	m.At = time.Now().UTC()
-	m.Mentions, m.MentionsAll = parseMentions(m.Text, h.roomHandles(r.Context(), members))
+	m.Mentions, m.MentionsAll = h.roomMentions(r.Context(), id, m.Text, members)
 	if m.Sender != "you" {
 		m.Hop = 1
 	} else {

@@ -104,6 +104,18 @@ var mentionPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])@([A-Za-z0-9][A-Za-z
 // used. Matching is case-insensitive and ignores trailing punctuation.
 var codeSpans = regexp.MustCompile("(?s)```.*?```|`[^`\n]*`")
 
+var leadMention = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_@])@lead\b`)
+
+// roomMentions parses mentions in a conversation; in a team, @lead names the lead.
+func (h *APIHandler) roomMentions(ctx context.Context, room, text string, members []string) ([]string, bool) {
+	ids, all := parseMentions(text, h.roomHandles(ctx, members))
+	if p := h.policyFor(ctx, room, members); p.Mode == "team" && p.Lead != "" && !containsID(ids, p.Lead) &&
+		leadMention.MatchString(codeSpans.ReplaceAllString(text, " ")) {
+		ids = append(ids, p.Lead)
+	}
+	return ids, all
+}
+
 func parseMentions(text string, handles map[string]string) (members []string, all bool) {
 	byHandle := map[string]string{}
 	for member, handle := range handles {

@@ -15,6 +15,10 @@ type Policy struct {
 	// Tone is "casual" (the default: short, chat-style, shorthand welcome)
 	// or "professional" (short and plain, no slang).
 	Tone string `json:"tone,omitempty"`
+	// Lead is the member who runs a team ("team" mode, shown as Goal): the
+	// owner's unaddressed messages go to the lead, workers report to it, and
+	// only its [done] finishes the run.
+	Lead string `json:"lead,omitempty"`
 }
 type Run struct {
 	ID           string    `json:"id"`
@@ -50,7 +54,7 @@ func (h *APIHandler) policy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid policy", 400)
 		return
 	}
-	if p.Mode != "reply" && p.Mode != "goal" && p.Mode != "continuous" {
+	if p.Mode != "reply" && p.Mode != "goal" && p.Mode != "continuous" && p.Mode != "team" {
 		http.Error(w, "unknown conversation mode", 400)
 		return
 	}
@@ -62,7 +66,16 @@ func (h *APIHandler) policy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "set a goal first", 400)
 		return
 	}
-	if p.Mode != "continuous" && (p.Limit < 1 || p.Limit > 100) {
+	if p.Mode == "team" {
+		var room Room
+		if h.store.Document(r.Context(), "room", id, &room) != nil || !containsID(room.Members, p.Lead) {
+			http.Error(w, "Choose a lead from this group's members.", 400)
+			return
+		}
+	} else {
+		p.Lead = ""
+	}
+	if p.Mode != "continuous" && p.Mode != "team" && (p.Limit < 1 || p.Limit > 100) {
 		http.Error(w, "reply limit must be between 1 and 100", 400)
 		return
 	}
