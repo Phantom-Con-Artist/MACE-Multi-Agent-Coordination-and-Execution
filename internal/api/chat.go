@@ -24,6 +24,8 @@ type Room struct {
 	// Claimed holds roles agents chose for themselves, which they may change.
 	// Roles set by the owner stay authoritative.
 	Claimed map[string]string `json:"claimed,omitempty"`
+	// Parent is set on a side chat: the group it belongs to.
+	Parent string `json:"parent,omitempty"`
 }
 type Message struct {
 	ID     string `json:"id"`

@@ -78,7 +78,7 @@ func TestCommandNotesStayOutOfTheAgentsTranscript(t *testing.T) {
 	for _, r := range rows {
 		raw = append(raw, r.Data)
 	}
-	if got := tm.s.handler.transcript(context.Background(), raw); got != "" {
+	if got := tm.s.handler.transcript(context.Background(), raw, ari.ID); got != "" {
 		t.Fatalf("notes must not reach the agent, got:\n%s", got)
 	}
 }

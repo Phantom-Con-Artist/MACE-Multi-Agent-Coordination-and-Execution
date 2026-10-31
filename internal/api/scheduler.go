@@ -451,8 +451,21 @@ func (h *APIHandler) dispatch(ctx context.Context, room string, m Message) error
 			}
 		}
 	}
+	sides := []string{}
+	if group != nil && group.Parent == "" && m.Sender == "you" {
+		sides = h.sideRooms(ctx, room)
+	}
 	h.sched.Lock()
 	rr := h.roomFor(room)
+	// The owner writing in a group also quiets its side chats.
+	for _, side := range sides {
+		for _, q := range h.queues {
+			q.queue = slices.DeleteFunc(q.queue, func(r *turnRequest) bool { return r.Room == side })
+			if q.running != nil && q.running.Room == side {
+				q.cancel(errSuperseded)
+			}
+		}
+	}
 	if owner {
 		// Each owner message starts a fresh reply budget.
 		rr.run = Run{ID: room, Status: "running", Policy: p}
@@ -613,9 +626,29 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		return // The owner wrote to this agent after the turn began.
 	}
 	reply := Message{ID: newID(), Room: req.Room, Sender: req.Member, Text: text, Flair: flair, Role: role, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: req.Hop + 1, Activity: res.Activity}
-	reply.Mentions, reply.MentionsAll = parseMentions(text, h.roomHandles(ctx, members))
+	sender := Session{ID: req.Member}
+	h.store.Document(ctx, "session", req.Member, &sender)
+	files := h.attachShares(ctx, &reply, sender)
+	if len(files) > 0 {
+		reply.File = files[0]
+	}
+	reply.Mentions, reply.MentionsAll = parseMentions(reply.Text, h.roomHandles(ctx, members))
+	if h.routeReply(ctx, group, req.Member, &reply) {
+		posted = true
+		h.sched.Lock()
+		if current && req.Gen == rr.gen {
+			rr.inflight--
+			rr.run.Replies++
+		}
+		h.sched.Unlock()
+		return
+	}
 	if _, err := h.postMessage(ctx, &reply); err != nil {
 		return
+	}
+	for _, f := range files[min(1, len(files)):] {
+		extra := Message{ID: newID(), Room: req.Room, Sender: req.Member, File: f, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: reply.Hop, Mentions: reply.Mentions}
+		h.postMessage(ctx, &extra)
 	}
 	// Count the reply as soon as it is visible, before anything saves the run.
 	posted = true

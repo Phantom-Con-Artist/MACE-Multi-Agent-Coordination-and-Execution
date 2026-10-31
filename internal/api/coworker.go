@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mace/internal/storage"
@@ -159,6 +158,13 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 		}
 		return header.String()
 	}
+	if group.Parent != "" {
+		var parent Room
+		h.store.Document(ctx, "room", group.Parent, &parent)
+		fmt.Fprintf(&header, "THIS TURN IS FOR A PRIVATE SIDE CHAT inside group %q, between %s. You are speaking as %s (@%s). The owner can read and join it. Use it for details the whole group does not need, keep it short, and settle things quickly. To post back to the group, start your message with [group].\n", limited(parent.Name, 200), h.memberName(ctx, members[0])+" and "+h.memberName(ctx, members[len(members)-1]), h.memberName(ctx, member), handles[member])
+		header.WriteString(chatStyle(p.Tone))
+		return header.String()
+	}
 	fmt.Fprintf(&header, "THIS TURN IS FOR MACE GROUP: %s\nYou are speaking as %s (@%s).\n", limited(group.Name, 200), h.memberName(ctx, member), handles[member])
 	if request := h.latestOwnerRequest(ctx, room); request != "" {
 		fmt.Fprintf(&header, "OWNER'S LATEST REQUEST: %q\n", limited(request, 600))
@@ -192,6 +198,7 @@ func (h *APIHandler) conversationHeader(ctx context.Context, room, member string
 	}
 	header.WriteString("HOW THIS TEAM WORKS: you are coworkers on the owner's request, all able to work at once. Split the work by what each of you is best placed to do, like a real team. Roles are not fixed: when a piece of work has no owner, claim it by starting a message with [role: what you take on], and claim again when the task shifts. Owner-assigned roles come first. Don't redo work someone else claimed; hand off with @handle; never speak for a coworker. If the owner's message is just chat, answer in a line and stop.\n")
 	header.WriteString(chatStyle(p.Tone))
+	header.WriteString("SHARING: never paste file contents or long output. Write [share: path] to attach a file, and tag @handle so only they open it. To talk privately with one coworker, start a message with [dm @handle]; the owner can still read that side chat.\n")
 	fmt.Fprintf(&header, "FLAIRS in this group: %s. You may add a new flair if it helps the request (up to %d custom).\n", "["+strings.Join(groupFlairs(group), "] [")+"]", maxCustomFlairs)
 	if n := h.lastReplyLength(ctx, room, member); n > longReply {
 		fmt.Fprintf(&header, "Your last message here was %d characters. Keep this one to a line or two unless it is a deliverable.\n", n)
@@ -234,7 +241,9 @@ func (h *APIHandler) lastReplyLength(ctx context.Context, room, member string) i
 	return 0
 }
 
-func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage) string {
+// transcript renders messages for one reader. Shared files show their path
+// only to the agents they were shared with.
+func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage, reader string) string {
 	var t strings.Builder
 	for _, b := range rows {
 		var m Message
@@ -243,7 +252,7 @@ func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage) str
 		}
 		fmt.Fprintf(&t, "%s: %s\n", h.memberName(ctx, m.Sender), m.Text)
 		if m.File != "" {
-			fmt.Fprintf(&t, "Shared file on the originating host: %s\n", filepath.Join(h.fileRoot, m.File))
+			t.WriteString(h.fileLine(ctx, m, reader))
 		}
 	}
 	return t.String()
@@ -268,7 +277,7 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	if len(recent) > 0 {
 		last = recent[len(recent)-1].Seq
 	}
-	full := header + "\nSHARED CONVERSATION (oldest to newest):\n" + truncate(h.transcript(ctx, raw(recent)), 72000) + "\nIt is your turn. Contribute your own next message.\n"
+	full := header + "\nSHARED CONVERSATION (oldest to newest):\n" + truncate(h.transcript(ctx, raw(recent), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	since := h.cursor(ctx, req.Member, req.Room)
 	if since == 0 {
 		return turnPrompt{Full: full}, last, true
@@ -278,7 +287,7 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	if more {
 		note = "(More messages arrived than fit here; the newest are below. Ask if you need the rest.)\n"
 	}
-	delta := header + "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer)), 72000) + "\nIt is your turn. Contribute your own next message.\n"
+	delta := header + "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	fresh := false
 	for _, row := range newer {
 		var m Message
