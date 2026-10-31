@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -50,6 +51,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -167,6 +169,7 @@ class ChatActions(
     val onLink: () -> Unit,
     /** Opens the hub's file browser on the web. */
     val onBrowse: () -> Unit,
+    val onClear: () -> Unit,
     val files: suspend (String) -> List<io.github.phantomconartist.mace.data.Entry>,
     val models: suspend (String) -> io.github.phantomconartist.mace.data.Models,
 )
@@ -189,6 +192,7 @@ fun ChatScreen(
     var picker by remember { mutableStateOf<String?>(null) }
     var menu by remember { mutableStateOf(false) }
     var confirmNew by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
     val agent = if (state.group) null else state.members.firstOrNull()
     var modelList by remember(state.id) { mutableStateOf<io.github.phantomconartist.mace.data.Models?>(null) }
     var folderList by remember(state.id) { mutableStateOf<Pair<String, List<String>>?>(null) }
@@ -279,6 +283,11 @@ fun ChatScreen(
                 }
             },
             actions = {
+                // Observe shows each agent's tool calls and file edits; off, only messages.
+                IconButton(onClick = { actions.onObserve(!observe) }) {
+                    Icon(if (observe) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff, if (observe) "Observe view on" else "Observe view off",
+                        tint = if (observe) mace.online else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (state.group) IconButton(onClick = actions.onMode) { Icon(Icons.Rounded.Tune, "Conversation mode") }
                 else if (agent != null) IconButton(onClick = actions.onBrowse) { Icon(Icons.Rounded.Folder, "Browse files on the web") }
                 IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, "More") }
@@ -292,6 +301,7 @@ fun ChatScreen(
                     )
                     if (state.run == "paused") DropdownMenuItem({ Text("Continue") }, leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) }, onClick = { menu = false; actions.onPause(false) })
                     else DropdownMenuItem({ Text("Pause") }, leadingIcon = { Icon(Icons.Rounded.Pause, null) }, onClick = { menu = false; actions.onPause(true) })
+                    DropdownMenuItem({ Text("Clear chat") }, leadingIcon = { Icon(Icons.Rounded.DeleteSweep, null) }, onClick = { menu = false; confirmClear = true })
                     agent?.let { a ->
                         if (a.status == "stopped" || a.status == "terminated") {
                             DropdownMenuItem({ Text("Resume agent") }, leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) }, onClick = { menu = false; actions.onControl(a.id, "resume") })
@@ -403,6 +413,7 @@ fun ChatScreen(
     picker?.let { start ->
         FilePicker(start, actions.files, onPick = { attachment = it; picker = null }, onDismiss = { picker = null })
     }
+    if (confirmClear) Confirm("Clear this chat?", "The messages are deleted from the hub and this phone. Agents keep their own memory; use /new to reset it.", "Clear", actions.onClear) { confirmClear = false }
     if (confirmNew) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmNew = false },
@@ -660,7 +671,8 @@ private fun Ticks(m: Message, state: ChatState, ink: Color) {
 /** In observe view, the steps an agent took for a reply: collapsed to a count, open to the list. */
 @Composable
 private fun StepsDisclosure(steps: List<io.github.phantomconartist.mace.data.Step>, ink: Color) {
-    var open by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf(true) }
+    var all by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 4.dp, vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.07f)).clickable { open = !open }.padding(horizontal = 8.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.Build, null, tint = ink.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
@@ -670,7 +682,13 @@ private fun StepsDisclosure(steps: List<io.github.phantomconartist.mace.data.Ste
             Spacer(Modifier.weight(1f, fill = false).width(8.dp))
             Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, if (open) "Hide steps" else "Show steps", tint = ink.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
         }
-        AnimatedVisibility(open) { StepList(steps, ink) }
+        AnimatedVisibility(open) {
+            Column {
+                StepList(if (all) steps else steps.takeLast(6), ink)
+                if (!all && steps.size > 6) Text("Show all ${steps.size} steps", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { all = true }.padding(vertical = 4.dp))
+            }
+        }
     }
 }
 

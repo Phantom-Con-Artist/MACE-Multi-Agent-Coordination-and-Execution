@@ -262,6 +262,9 @@ class Hub(val origin: String, private val credential: String? = null, private va
         post("/api/v1/rooms", json.encodeToString(NewGroup.serializer(), NewGroup(name, members)))
 
     /** Removes a group; its history stays on the hub. */
+    /** Deletes a conversation's messages on the hub. */
+    suspend fun clearChat(room: String): JsonElement = post("/api/v1/chats/${enc(room)}/clear", "{}")
+
     suspend fun removeGroup(room: String): JsonElement = post("/api/v1/rooms/${enc(room)}/remove", "{}")
 
     suspend fun addMember(room: String, member: String): JsonElement =

@@ -140,6 +140,15 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 					out = append(out, m)
 				}
 			}
+			if cut := h.clearedAt(id); !cut.IsZero() {
+				kept := out[:0]
+				for _, m := range out {
+					if m.Seq > 0 || m.At.After(cut) {
+						kept = append(kept, m)
+					}
+				}
+				out = kept
+			}
 			slices.SortStableFunc(out, func(a, b Message) int { return a.At.Compare(b.At) })
 		}
 		w.Header().Set("X-More", strconv.FormatBool(more))

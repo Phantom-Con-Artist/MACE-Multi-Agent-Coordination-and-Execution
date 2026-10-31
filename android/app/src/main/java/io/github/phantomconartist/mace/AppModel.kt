@@ -289,6 +289,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             val unread = if (_chat.value?.id == room) 0 else e.unread
             Conversation(room, nameOf(room), preview(e.latest), unread, room in groups, e.latest.at, working[room].orEmpty().isNotEmpty(), photoOf(room),
                 online = membersIds(room).count { members[it]?.online == true }, members = membersIds(room).size)
+        }.toMutableList().also { list ->
+            // A group with no messages, new or cleared, stays in the list.
+            groups.values.filter { g -> g.parent.isEmpty() && list.none { it.id == g.id } }.forEach { g ->
+                list += Conversation(g.id, g.name, "No messages yet", 0, true, "", false, photoOf(g.id), online = membersIds(g.id).count { members[it]?.online == true }, members = membersIds(g.id).size)
+            }
         }.sortedByDescending { it.at }
         _screen.update { (it as? Screen.Home)?.copy(conversations = list, loading = loading, hub = session.hubName) ?: it }
     }
@@ -483,6 +488,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         if (_chat.value?.id == id) _chat.value = null
     }) {
         if (id in groups) removeGroup(id) else control(id, "remove")
+    }
+
+    /** Deletes the history of chats, here and on the hub. The agents and groups stay. */
+    fun clearChats(ids: Set<String>) {
+        viewModelScope.launch {
+            try {
+                ids.forEach { id ->
+                    hub().clearChat(id)
+                    cache.saveMessages(id, emptyList())
+                    if (_chat.value?.id == id) _chat.update { it?.copy(messages = emptyList(), firstUnread = 0, older = false) }
+                }
+                runCatching { loadDirectory(); loadInbox() }
+                _notice.value = if (ids.size == 1) "Chat cleared." else "${ids.size} chats cleared."
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            }
+        }
     }
 
     fun markRead(ids: Set<String>) {

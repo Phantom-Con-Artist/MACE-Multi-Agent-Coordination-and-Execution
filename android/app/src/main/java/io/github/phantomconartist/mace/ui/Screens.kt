@@ -103,7 +103,7 @@ class HomeActions(
     val onNewChat: () -> Unit,
     val onNewGroup: () -> Unit,
     val onStartAgent: () -> Unit,
-    val onRemove: (String) -> Unit,
+    val onClear: (Set<String>) -> Unit,
     val onMarkRead: (Set<String>) -> Unit,
     val onSignOut: () -> Unit,
     val onLinked: () -> Unit,
@@ -191,7 +191,7 @@ fun HomeScreen(
                     title = { Text(selected.size.toString()) },
                     actions = {
                         IconButton({ actions.onMarkRead(selected); selected = emptySet() }) { Icon(Icons.Rounded.DoneAll, "Mark as read") }
-                        IconButton({ confirm = true }) { Icon(Icons.Rounded.Delete, "Remove") }
+                        IconButton({ confirm = true }) { Icon(Icons.Rounded.Delete, "Delete chat history") }
                     },
                 )
             } else {
@@ -262,16 +262,11 @@ fun HomeScreen(
         }
     }
     if (confirm) {
-        val groups = selected.count { id -> state.conversations.any { it.id == id && it.group } }
         Confirm(
-            title = if (selected.size == 1) "Remove this chat?" else "Remove ${selected.size} chats?",
-            text = buildString {
-                if (groups > 0) append("Removing a group stops its work. ")
-                if (groups < selected.size) append("Removing an agent's chat removes the agent from every chat and group. ")
-                append("History stays on the hub.")
-            },
-            action = "Remove",
-            onConfirm = { selected.forEach(actions.onRemove); selected = emptySet() },
+            title = if (selected.size == 1) "Delete this chat's history?" else "Delete the history of ${selected.size} chats?",
+            text = "The messages are deleted from the hub and this phone. The agents and groups stay, and an agent keeps its own memory. Use /new in a chat to reset that.",
+            action = "Delete",
+            onConfirm = { actions.onClear(selected); selected = emptySet() },
             onDismiss = { confirm = false },
         )
     }

@@ -35,6 +35,7 @@ var clientRoutes = []string{
 	"POST /api/v1/sessions/{id}/photo",
 	"DELETE /api/v1/sessions/{id}/photo",
 	"POST /api/v1/chats/{room}/upload",
+	"POST /api/v1/chats/{room}/clear",
 	"GET /api/v1/rooms/{room}/photo",
 	"POST /api/v1/rooms/{room}/photo",
 	"DELETE /api/v1/rooms/{room}/photo",

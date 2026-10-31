@@ -201,6 +201,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/sessions/{id}/photo", handler.photo)
 		r.Delete("/sessions/{id}/photo", handler.photo)
 		r.Post("/chats/{room}/upload", handler.upload)
+		r.Post("/chats/{room}/clear", handler.clearChat)
 		r.Get("/rooms/{room}/photo", handler.photo)
 		r.Post("/rooms/{room}/photo", handler.photo)
 		r.Delete("/rooms/{room}/photo", handler.photo)

@@ -165,3 +165,13 @@ func (s *Store) EachMessage(ctx context.Context, visit func(room string, m Store
 	}
 	return nil
 }
+
+// DeleteMessages removes every stored message of a conversation and reports
+// how many there were. Sequence numbers are never reused.
+func (s *Store) DeleteMessages(ctx context.Context, room string) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE room=?`, room)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

@@ -87,6 +87,7 @@ A conversation is a direct chat (its ID is the agent's ID) or a group (`Room`).
 - `POST /api/v1/chats/{room}/messages` with `{"text", "file", "client_id"}`. `client_id` makes a retry safe: the same ID is posted once.
 - `GET|POST /api/v1/chats/{room}/policy`: `Policy` is `{"mode": "reply" | "goal" | "continuous" | "team", "goal", "limit", "tone", "lead"}`.
 - `POST /api/v1/chats/{room}/upload?name=<file name>` with a file up to 200 MB as the body stores it with the conversation and answers `{"file", "size"}`; post a message with that `file` to send it. Agents share files back by writing `[share: path]`, which the hub turns into a message's `file`.
+- `POST /api/v1/chats/{room}/clear` deletes the conversation's messages stored on the hub and hides older ones from other machines; answers `{"cleared": n}`. Agents keep their own memory (`/new` resets it). Clients get a `reset` event.
 - `POST /api/v1/chats/{room}/pause` pauses the conversation and `POST /api/v1/chats/{room}/continue` resumes it. `POST /api/v1/chats/{room}/start` always answers 409: conversations start when the owner writes.
 - `GET /api/v1/chats/{room}/receipts`: how far each agent has read, by `seq`.
 - `GET /api/v1/runs`: the state of every conversation's work, `Run` is `{"id", "status", "replies", "policy", "error", "active_members", "usage": Usage}`.

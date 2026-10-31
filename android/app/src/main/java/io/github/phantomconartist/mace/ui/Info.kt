@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AddAPhoto
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.InsertDriveFile
@@ -197,6 +198,7 @@ fun InfoPage(id: String, model: AppModel, actions: InfoActions) {
                         item { SettingRow(Icons.Rounded.RecordVoiceOver, "Texting style", if (policy?.tone == "professional") "Professional: short and plain" else "Casual: short, chat-style", onClick = { mode = true }) }
                         item { SettingRow(Icons.Rounded.Visibility, "Observe view", if (observe) "Shows tool calls and file edits" else "Messages only", onClick = { model.setObserve(!observe) }) { MaceSwitch(observe, model::setObserve) } }
                         item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 8.dp)) }
+                        item { SettingRow(Icons.Rounded.DeleteSweep, "Clear chat", "Delete this group's messages", danger = true, onClick = { confirm = "clear" }) }
                         item { SettingRow(Icons.Rounded.Delete, "Remove group", danger = true, onClick = { confirm = "group" }) }
                         item { Text("Removing a group stops its work and keeps its history. Removing a member keeps their agent and direct chat.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
                     }
@@ -210,6 +212,7 @@ fun InfoPage(id: String, model: AppModel, actions: InfoActions) {
                 item { SettingRow(Icons.Rounded.Folder, "Working folder", agent.folder.ifEmpty { "/" }, onClick = { actions.onFiles(agent.folder) }) }
                 item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 8.dp)) }
                 if (agent.status != "terminated") item { SettingRow(Icons.Rounded.PowerSettingsNew, "Terminate agent", "Ends its session. Resume brings it back.", danger = true, onClick = { model.control(agent.id, "terminate") }) }
+                item { SettingRow(Icons.Rounded.DeleteSweep, "Clear chat", "Delete this conversation's messages. The agent stays.", danger = true, onClick = { confirm = "clear" }) }
                 item { SettingRow(Icons.Rounded.Delete, "Remove agent from chats", "History stays on the hub. It also leaves every group.", danger = true, onClick = { confirm = "agent" }) }
             }
         }
@@ -219,6 +222,7 @@ fun InfoPage(id: String, model: AppModel, actions: InfoActions) {
     if (adding && room != null) AddMemberDialog(agents.filter { it.id !in room.members }, model, onPick = { model.addMember(id, it.id); adding = false }, onDismiss = { adding = false })
     role?.let { m -> RoleDialog(m.name, room?.roles?.get(m.id).orEmpty(), onSave = { model.setRole(id, m.id, it); role = null }, onDismiss = { role = null }) }
     when (confirm) {
+        "clear" -> Confirm("Clear this chat?", "The messages are deleted from the hub and this phone. The agent keeps its own memory.", "Clear", { model.clearChats(setOf(id)) }) { confirm = null }
         "group" -> Confirm("Remove this group?", "Its work stops. The history stays on the hub.", "Remove", { model.removeConversation(id); actions.onBack() }) { confirm = null }
         "agent" -> Confirm("Remove ${agent?.name ?: "this agent"}?", "It leaves every chat and group. The history stays on the hub.", "Remove", { model.removeConversation(id); actions.onBack() }) { confirm = null }
     }
