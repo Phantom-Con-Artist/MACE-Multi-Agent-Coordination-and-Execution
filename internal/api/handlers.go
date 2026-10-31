@@ -27,6 +27,10 @@ type APIHandler struct {
 	sendMu      sync.Mutex
 	events      *hub
 	records     *records.Log
+	// advertise overrides the address other machines use to reach this one.
+	advertise  string
+	port       int
+	nodeHealth nodeState
 	// sched guards the per-agent inboxes and per-room run state.
 	sched     sync.Mutex
 	runSaveMu sync.Mutex

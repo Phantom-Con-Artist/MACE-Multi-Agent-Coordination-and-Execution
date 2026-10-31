@@ -121,6 +121,14 @@ func (d *devices) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Joining is authorized by its one-time code, a node's identity is
+		// public, and requests between nodes are checked by their handlers
+		// against the sender's node key.
+		if r.URL.Path == "/api/v1/nodes/accept" || r.URL.Path == "/api/v1/node/identity" ||
+			(strings.HasPrefix(r.URL.Path, "/api/v1/node/") && r.Header.Get("X-Mace-Node") != "") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+d.secret)) == 1 {
 			next.ServeHTTP(w, r)
 			return

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -386,6 +387,11 @@ func (c settings) request(path string, out any) error {
 	return c.call("GET", path, 3*time.Second, out)
 }
 func (c settings) call(method, path string, timeout time.Duration, out any) error {
+	return c.send(method, path, timeout, nil, out)
+}
+
+// send is call with a JSON body.
+func (c settings) send(method, path string, timeout time.Duration, body, out any) error {
 	r := c.info()
 	if !c.owns(c.pid()) {
 		return errors.New("server is stopped; run mace start")
@@ -394,10 +400,19 @@ func (c settings) call(method, path string, timeout time.Duration, out any) erro
 	if url == "" {
 		url = c.localURL()
 	}
-	req, e := http.NewRequest(method, url+"/api/v1"+path, nil)
+	var data io.Reader
+	if body != nil {
+		b, e := json.Marshal(body)
+		if e != nil {
+			return e
+		}
+		data = bytes.NewReader(b)
+	}
+	req, e := http.NewRequest(method, url+"/api/v1"+path, data)
 	if e != nil {
 		return e
 	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.token())
 	client := http.Client{Timeout: timeout}
 	res, e := client.Do(req)
@@ -406,8 +421,11 @@ func (c settings) call(method, path string, timeout time.Duration, out any) erro
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 1000))
-		return fmt.Errorf("host returned %d: %s", res.StatusCode, body)
+		msg, _ := io.ReadAll(io.LimitReader(res.Body, 1000))
+		if res.StatusCode >= 400 && res.StatusCode < 500 {
+			return errors.New(strings.TrimSpace(string(msg)))
+		}
+		return fmt.Errorf("host returned %d: %s", res.StatusCode, msg)
 	}
 	return json.NewDecoder(res.Body).Decode(out)
 }
@@ -534,7 +552,7 @@ func (c settings) doctor() error {
 }
 func help() {
 	bootstrap.Brand()
-	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  setup [--port 8080] [--remove]        Run MACE as a background service\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
+	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  setup [--port 8080] [--remove]        Run MACE as a background service\n  join --invite                         Print a code for adding another machine\n  join <address> <code>                 Add this machine to your other machines\n  machines                              List joined machines and who is available\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
 }
 func run(args []string) error {
 	command := "help"
@@ -567,6 +585,10 @@ func run(args []string) error {
 		return c.start()
 	case "setup":
 		return c.setup(args)
+	case "join":
+		return c.join(args)
+	case "nodes", "machines":
+		return c.nodes()
 	case "stop":
 		if portFlag(args) {
 			return c.stopPort(false)

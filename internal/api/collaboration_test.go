@@ -15,9 +15,14 @@ import (
 
 func call(t *testing.T, s *Server, method, path string, body any, out any) int {
 	t.Helper()
+	return callAs(t, s, "secret", method, path, body, out)
+}
+
+func callAs(t *testing.T, s *Server, secret, method, path string, body any, out any) int {
+	t.Helper()
 	b, _ := json.Marshal(body)
 	r := httptest.NewRequest(method, path, bytes.NewReader(b))
-	r.Header.Set("Authorization", "Bearer secret")
+	r.Header.Set("Authorization", "Bearer "+secret)
 	w := httptest.NewRecorder()
 	s.Router().ServeHTTP(w, r)
 	if w.Code >= 400 {

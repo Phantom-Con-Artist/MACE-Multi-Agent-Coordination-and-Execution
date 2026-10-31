@@ -1,6 +1,6 @@
-# MACE checkpoint, 2026-10-31 (end of the second session)
+# MACE checkpoint, 2026-10-31 (third session)
 
-Paused by the owner to start a new task. Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds. Working tree clean after the last commit.
+Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds. Working tree clean after the last commit.
 
 ## Done (commits on the branch, oldest first)
 
@@ -18,10 +18,13 @@ Paused by the owner to start a new task. Branch: `phase-0-hardening` (not merged
 12. Hub and worker step 1, records (`c4e940b`): `internal/records` (SHA-256 of a canonical v1 envelope, Ed25519 signature, per-node chain via `prev`, `seen` heads, hybrid logical clock, causal `Order`, `VerifyChain`), schema v4 (`records`, `heads`), node key at `<state>/node.key` (0600). Every message is also written as a record and carries its ID in `record`; earlier messages backfill once at start. Checked on a copy of the owner's database: 20 messages, 6 conversations, backup taken, no duplicates on restart.
 13. Hub and worker step 2, worker service (`0a7e642`): `mace setup [--port] [--host] [--no-linger]`, `mace setup --remove`. User unit captures PATH, `Restart=on-failure`, token kept out of the journal under systemd. Checked on real systemd with an isolated unit (`MACE_SERVICE_NAME=mace-test`): restarted 7 s after a forced kill, all four CLIs detected, removed cleanly.
 
+14. Hub and worker step 3, joining: `mace join --invite`, `mace join <address> <code>`, `mace machines`; signed node requests, introductions, availability every 15 s (`internal/api/nodes.go`, `cmd/mace/nodes.go`). Checked live with three isolated servers on the tailnet address 100.94.153.17. QR moved to step 6.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
 - Linger (start at boot before login); not run because it changes a system setting.
+- Joining and availability across two real machines (the tailnet has only `fedora` so far).
 - Anything across real machines: peer monitors, remote commands, Tailnet, phone hardware, two-machine Wi-Fi.
 - Launching an app from the grid (not clicked, to avoid opening windows on the owner's desktop).
 
@@ -29,7 +32,6 @@ Paused by the owner to start a new task. Branch: `phase-0-hardening` (not merged
 
 Follow the build order in docs/DESIGN-HUB-WORKER.md:
 
-3. Joining: node keys exchanged with `mace join` or a QR code, discovery over Tailscale. Needs the owner to run `sudo tailscale up` (logged out on 2026-10-31); otherwise only localhost protocol tests are possible and must be reported as such.
 4. Hub: head comparison, chain walking, read-only caches, merged views, routing actions to owner nodes, offline gaps in the interface. Switch the interface from messages to records here.
 5. Chunked, content-addressed files and transfers (absorbs the transfer part of phase 3).
 6. `mace-server start` with the Tailscale HTTPS link, QR sign-in, home-screen install, notifications, and a hub switcher on the phone.

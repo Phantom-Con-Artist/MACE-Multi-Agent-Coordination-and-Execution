@@ -38,3 +38,14 @@ func (s *Store) Document(ctx context.Context, kind, id string, value any) error 
 	}
 	return json.Unmarshal([]byte(data), value)
 }
+
+// DeleteDocument removes a document and reports whether it existed, so a
+// caller can consume a one-time document exactly once.
+func (s *Store) DeleteDocument(ctx context.Context, kind, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM documents WHERE kind=? AND id=?`, kind, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}

@@ -190,6 +190,9 @@ func (id *Identity) Seal(r Record) (Record, error) {
 	return r, nil
 }
 
+// Sign signs a message with the node key, for requests between nodes.
+func (id *Identity) Sign(msg []byte) []byte { return ed25519.Sign(id.private, msg) }
+
 // Verify checks that a record's ID matches its content, that it names the
 // node owning pub, and that the node signed it.
 func Verify(r Record, pub ed25519.PublicKey) error {

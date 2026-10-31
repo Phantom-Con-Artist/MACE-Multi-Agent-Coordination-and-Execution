@@ -65,6 +65,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	r.Use(corsMiddleware)
 
 	handler := NewAPIHandler(supervisor, store, cfg.NodeInfo)
+	handler.port = cfg.Port
 	handler.fileRoot = os.Getenv("MACE_FILE_ROOT")
 	if handler.fileRoot == "" {
 		handler.fileRoot = "/"
@@ -110,6 +111,14 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/catalog", handler.catalog)
+		r.Get("/node/identity", handler.nodeIdentity)
+		r.Get("/node/ping", handler.ping)
+		r.Post("/node/announce", handler.announced)
+		r.Get("/nodes", handler.listNodes)
+		r.Post("/nodes/invite", handler.invite)
+		r.Post("/nodes/join", handler.join)
+		r.Post("/nodes/accept", handler.accept)
+		r.Post("/nodes/{id}/remove", handler.removeNode)
 		r.Get("/devices", signIns.list)
 		r.Post("/devices/{id}/revoke", signIns.revoke)
 		r.Get("/sessions", handler.sessions)
@@ -205,6 +214,7 @@ func (s *Server) Start(ctx context.Context) error {
 	var errChan = make(chan error, 1)
 	go s.handler.guardPresence(ctx)
 	go s.handler.watchMachine(ctx)
+	go s.handler.watchNodes(ctx)
 
 	go func() {
 		if s.listener != nil {
