@@ -1625,3 +1625,72 @@
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+/* Host apps as a launcher grid, grouped by desktop category. */
+.app .app-group h2 {
+  margin: 26px 0 10px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.app .app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px;
+}
+.app .app-grid > button {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 4px 10px;
+  border-radius: 18px;
+  background: transparent;
+  text-align: center;
+}
+.app .app-grid > button:hover,
+.app .app-grid > button:focus-visible {
+  background: var(--soft);
+}
+.app .app-grid > button:active .app-tile {
+  transform: scale(0.94);
+}
+.app .app-grid > button > span:last-child {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--font-small);
+  line-height: 1.35;
+}
+.app-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  border-radius: 30%;
+  background: var(--av-bg);
+  color: var(--av-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--av-fg) 14%, transparent);
+  transition: transform 160ms var(--ease-out);
+}
+.app-tile svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.app-tile-cut {
+  fill: var(--av-fg);
+  opacity: 0.18;
+}
+.app-tile b {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}

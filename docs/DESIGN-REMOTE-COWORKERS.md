@@ -370,7 +370,7 @@ Done and committed: phase 0 (hardening), phase 1 (parallel coworkers, shared nat
 Requested by the owner and still to do, in order:
 
 1. Machine monitoring (done): CPU, GPU, memory, disk, and load for every connected host, sampled on each host and streamed. Shown as small theme-aware SVG charts (sparklines, ring gauges) rather than a charting library, to keep the phone bundle small.
-2. Visual Host and Activity pages: activity as a timeline with charts instead of text lists (done); app launching from a visual grid (to do).
+2. Visual Host and Activity pages: activity as a timeline with charts instead of text lists (done); app launching from a visual grid (done; launches not exercised in review).
 3. Phase 2 commands: `/` commands in private chats (model, folder, new session, status), model switching that applies everywhere. Done; verified live with Muse only.
 4. Phase 3 files: streaming viewer for any size, pdf.js, hex view, resumable transfers without the 32 MiB cap.
 5. The full CLI: animated logo and spinners, subcommands for agents, chats, apps, machines, and Live View, with plain output when not on a terminal.

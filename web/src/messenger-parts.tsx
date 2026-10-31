@@ -63,6 +63,20 @@ export function Avatar({
   );
 }
 
+/** A host app: its initials on an avatar color, with the logo's triangle cut. */
+export function AppTile({ name, size = 56 }: { name: string; size?: number }) {
+  const words = name.replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean);
+  const initials = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 2)).toUpperCase();
+  return (
+    <span className={"app-tile profile-" + (hash(name) % 6)} style={{ width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 56 56">
+        <path d="M56 0 L56 30 L30 0 Z" className="app-tile-cut" />
+      </svg>
+      <b>{initials}</b>
+    </span>
+  );
+}
+
 const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
 export function dayLabel(at: string) {

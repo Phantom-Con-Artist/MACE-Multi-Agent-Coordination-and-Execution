@@ -20,6 +20,7 @@ function PeerMachine({ id, name }: { id: string; name: string }) {
   return <MachineCard name={name} history={history} error={error} />;
 }
 import {
+  AppTile,
   Avatar,
   PlainWithMentions,
   parseCommand,
@@ -285,7 +286,7 @@ export default function Workspace() {
     [preview, setPreview] = useState(""),
     [activity, setActivity] = useState<Audit[]>([]),
     [transfers, setTransfers] = useState<Transfer[]>([]),
-    [apps, setApps] = useState<{ id: string; name: string }[]>([]);
+    [apps, setApps] = useState<{ id: string; name: string; category?: string }[]>([]);
   const [activityLoading, setActivityLoading] = useState(true),
     [appsLoading, setAppsLoading] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
@@ -1843,24 +1844,29 @@ export default function Workspace() {
                     Finding your host apps…
                   </p>
                 )}
-                <div className="apps-list">
-                  {apps
-                    .filter((a) =>
-                      a.name.toLowerCase().includes(search.toLowerCase()),
-                    )
+                {Object.entries(
+                  apps
+                    .filter((a) => a.name.toLowerCase().includes(search.toLowerCase()))
                     .sort((a, b) => a.name.localeCompare(b.name))
-                    .map((a) => (
-                      <button
-                        key={a.id}
-                        title={a.name}
-                        disabled={busy}
-                        onClick={() => void open(a.id)}
-                      >
-                        <span>{a.name}</span>
-                        <ChevronRight size={17} />
-                      </button>
-                    ))}
-                </div>
+                    .reduce<Record<string, typeof apps>>((groups, a) => {
+                      (groups[a.category || "Other"] ||= []).push(a);
+                      return groups;
+                    }, {}),
+                )
+                  .sort(([a], [b]) => (a === "Other" ? 1 : b === "Other" ? -1 : a.localeCompare(b)))
+                  .map(([category, list]) => (
+                    <section className="app-group" key={category}>
+                      <h2>{category}</h2>
+                      <div className="app-grid">
+                        {list.map((a) => (
+                          <button key={a.id} title={"Open " + a.name} disabled={busy} onClick={() => void open(a.id)}>
+                            <AppTile name={a.name} />
+                            <span>{a.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
                 {!appsLoading &&
                   apps.length > 0 &&
                   !apps.some((a) =>

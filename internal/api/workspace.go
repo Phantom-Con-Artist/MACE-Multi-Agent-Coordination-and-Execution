@@ -141,8 +141,9 @@ func (h *APIHandler) activity(w http.ResponseWriter, r *http.Request) {
 }
 
 type DesktopApp struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
 }
 
 func desktopApps() []DesktopApp {
@@ -161,7 +162,7 @@ func desktopApps() []DesktopApp {
 			if e != nil {
 				continue
 			}
-			name := ""
+			name, category := "", ""
 			hidden := false
 			in := false
 			for _, line := range strings.Split(string(b), "\n") {
@@ -174,12 +175,15 @@ func desktopApps() []DesktopApp {
 				if strings.HasPrefix(line, "Name=") {
 					name = strings.TrimPrefix(line, "Name=")
 				}
+				if strings.HasPrefix(line, "Categories=") {
+					category = mainCategory(strings.TrimPrefix(line, "Categories="))
+				}
 				if line == "NoDisplay=true" || line == "Hidden=true" {
 					hidden = true
 				}
 			}
 			if name != "" && !hidden && !seen[entry.Name()] {
-				out = append(out, DesktopApp{ID: path, Name: name})
+				out = append(out, DesktopApp{ID: path, Name: name, Category: category})
 				seen[entry.Name()] = true
 			}
 		}
@@ -234,4 +238,21 @@ func (h *APIHandler) hostAction(w http.ResponseWriter, r *http.Request) {
 	h.supervisor.CloseInput(proc.ID)
 	h.audit("you", "HOST_OPEN", proc.ID, map[string]any{"app": req.App, "path": req.Path})
 	writeJSON(w, 201, proc)
+}
+
+// mainCategory turns a desktop entry's Categories list into one of the
+// freedesktop main categories, named for people, or "Other".
+func mainCategory(list string) string {
+	names := map[string]string{
+		"AudioVideo": "Media", "Audio": "Media", "Video": "Media",
+		"Development": "Development", "Education": "Education", "Game": "Games",
+		"Graphics": "Graphics", "Network": "Internet", "Office": "Office",
+		"Science": "Science", "Settings": "Settings", "System": "System", "Utility": "Utilities",
+	}
+	for _, c := range strings.Split(list, ";") {
+		if n, ok := names[strings.TrimSpace(c)]; ok {
+			return n
+		}
+	}
+	return "Other"
 }

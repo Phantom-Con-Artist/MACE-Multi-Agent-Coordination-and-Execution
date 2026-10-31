@@ -13,18 +13,19 @@ Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All 
 
 7. Phone review: Activity as a timeline (sentence-case events, MACE instead of internal actors, a mark per event kind, details as a wrapped list), truthful Host empty state, CPU peak, a real wallpaper switch, full-width device rows, MACE in product copy.
 8. Phase 2 commands: `/model`, `/models`, `/cd`, `/new`, `/stop`, `/status`, `/rename`, `/files`, `/help` in private chats via `POST /api/v1/sessions/{id}/command`. Results are `kind: "note"` messages that never reach the agent's transcript. Models from `agy models` (cached 10 min), Claude Code aliases, or free entry (`GET /sessions/{id}/models`). Composer suggests commands, models, and folders; `/new` confirms in a dialog. Verified live with Muse: `/status`, `/cd`, `/new`, and the next turn reporting the new folder.
+9. Host apps as a launcher grid grouped by desktop category, with monogram tiles in the avatar color profiles (`category` on `/api/v1/apps`).
 
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live).
 - Peer machine monitors with a real second host. Phone hardware, Tailnet, real two-machine Wi-Fi.
+- Launching an app from the new grid (not clicked, to avoid opening windows on the owner's desktop).
 - `/model` with a live Claude Code or Codex turn, and commands on a remote agent through a real second host.
 
 ## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
 
-1. App launching from a visual grid (rest of item 2 in the design status list).
-2. Files: streaming viewer for any size, pdf.js, hex view, transfers without the 32 MiB cap.
-3. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
+1. Files: streaming viewer for any size, pdf.js, hex view, transfers without the 32 MiB cap.
+2. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
 
 ## Be careful
 
