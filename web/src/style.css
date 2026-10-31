@@ -169,7 +169,8 @@ h1 {
   color: var(--muted);
   letter-spacing: 0;
 }
-.chatlist header button {
+.chatlist header > button,
+.chatlist header .menu-anchor > button {
   width: 40px;
 }
 .search {

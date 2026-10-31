@@ -93,7 +93,9 @@
 .app .count {
   font-size: var(--font-secondary);
 }
-.app .chatlist header button {
+/* Only the header's own buttons; the new-chat menu inside it has full rows. */
+.app .chatlist header > button,
+.app .chatlist header .menu-anchor > button {
   width: 44px;
 }
 .app .search {
@@ -1764,4 +1766,202 @@
   font-size: var(--font-secondary);
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+/* Your machines: one card per machine. Cards swipe with native scroll-snap
+   on touch screens; the arrows step through them where a pointer is fine. */
+.app .machines-view {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.app .machine-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.app .machine-where {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+.app .machine-where strong {
+  font-family: var(--font-display);
+  font-stretch: 110%;
+  font-size: clamp(1.05rem, 0.95rem + 0.5vw, 1.3rem);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app .machine-where small {
+  color: var(--muted);
+  font-size: var(--font-small);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.app .machine-step {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .app .machine-step {
+    display: inline-flex;
+    order: 2;
+  }
+  .app .machine-where {
+    order: 1;
+  }
+  .app .machine-step:disabled {
+    opacity: 0.35;
+  }
+}
+.app .machine-strip {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-radius: 22px;
+}
+.app .machine-strip::-webkit-scrollbar {
+  display: none;
+}
+.app .machine-strip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.app .machine-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+}
+.app .machine-slide .machine {
+  height: 100%;
+  transition: opacity 250ms var(--ease-out);
+}
+.app .machine-slide:not(.current) .machine {
+  opacity: 0.55;
+}
+.app .machine-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: -4px;
+}
+.app .machine-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: width 250ms var(--ease-out), background 250ms var(--ease-out);
+}
+.app .machine-dots i.on {
+  width: 18px;
+  background: var(--accent);
+}
+.app .machine-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--soft);
+}
+.app .machine-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  border-radius: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: var(--font-secondary);
+}
+.app .machine-tabs button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+.app .machine-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.app .machine-panel .search {
+  margin-inline: 0;
+}
+.app .machine-empty {
+  margin: 6px 0;
+}
+.app .machine-problem {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: var(--font-secondary);
+}
+.app .machine-add {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.app .machine-start {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.app .machine-start p small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.app .machine-start .provider-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.app .machine-start .provider-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.app .machine-start > .secondary:last-child {
+  justify-self: start;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app .machine-slide .machine,
+  .app .machine-dots i {
+    transition: none;
+  }
+}
+
+/* Connected hosts: room between the address, each agent, and the next host. */
+.app .peer-row {
+  display: grid;
+  gap: 12px;
+  padding: 22px 0;
+}
+.app .peer-row h2,
+.app .peer-row p {
+  margin: 0;
+}
+.app .peer-row .peer-url {
+  color: var(--muted);
+  margin-top: -6px;
+}
+.app .peer-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.app .peer-agents button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }

@@ -9,16 +9,13 @@ import {
   type ReactNode,
 } from "react";
 import PublicSite from "./public-site";
+import { Machines, machineBase, type Machine } from "./machines";
 import { Button } from "@/components/ui/button";
 const AgentMessage = lazy(() => import("./agent-message"));
 import { StepList, WorkCard, type Step } from "./agent-work";
 import { MaceLogo, MaceMark, WorkingPills } from "./brand";
-import { ActivityBars, EventDetails, EventIcon, MachineCard, actorLabel, eventTitle, usePeerMetrics, type Sample } from "./charts";
+import { ActivityBars, EventDetails, EventIcon, actorLabel, eventTitle, type Sample } from "./charts";
 
-function PeerMachine({ id, name }: { id: string; name: string }) {
-  const { history, error } = usePeerMetrics(id, true);
-  return <MachineCard name={name} history={history} error={error} />;
-}
 import {
   AppTile,
   Avatar,
@@ -302,6 +299,8 @@ export default function Workspace() {
     [directory, setDirectory] = useState("/"),
     [purpose, setPurpose] = useState("page"),
     [preview, setPreview] = useState(""),
+    // The machine a previewed file lives on; null is this computer.
+    [previewOn, setPreviewOn] = useState<Machine | null>(null),
     [activity, setActivity] = useState<Audit[]>([]),
     [transfers, setTransfers] = useState<Transfer[]>([]),
     [apps, setApps] = useState<{ id: string; name: string; category?: string }[]>([]);
@@ -959,6 +958,48 @@ export default function Workspace() {
       setApps(await api<typeof apps>("/v1/apps"));
       nav("apps");
     });
+  }
+  // One agent with its controls, on whichever machine it runs.
+  const agentRow = (a: Agent) => (
+    <div className="agent-row" key={a.id}>
+      <button
+        className="agent-open"
+        onClick={() => {
+          select(a.id);
+          nav("messenger");
+        }}
+      >
+        <Avatar {...look(a.id)} size={38} working={a.status === "replying"} />
+        <span>
+          <strong>{a.name}</strong>
+          <small title={a.working_dir}>
+            @{a.handle} · {folderName(a.working_dir)}
+          </small>
+        </span>
+        <em className={"status-chip " + a.status}>{statusLabel(a.status)}</em>
+      </button>
+      <div className="agent-actions">
+        <button className="icon-button" title="Stop" aria-label={"Stop " + a.name} onClick={() => void control(a.id, "stop")}>
+          <Square size={16} />
+        </button>
+        <button className="icon-button" title="Terminate" aria-label={"Terminate " + a.name} onClick={() => void control(a.id, "terminate")}>
+          <Power size={16} />
+        </button>
+        <button className="icon-button danger" title="Remove" aria-label={"Remove " + a.name} onClick={() => void control(a.id, "remove")}>
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </div>
+  );
+  // Starts an agent on this computer or on a joined machine, then opens it.
+  async function startOn(m: Machine, provider: string, folder: string) {
+    const a = m.self
+      ? await api<Agent>("/v1/sessions", { provider, working_dir: folder })
+      : await api<Agent>("/v1/peers/" + encodeURIComponent(m.id) + "/sessions", { provider, working_dir: folder });
+    if (!m.self) setRemote((v) => [...v.filter((x) => x.id !== a.id), a]);
+    await refresh();
+    select(a.id);
+    nav("messenger");
   }
   const files = (
     <>
@@ -1819,91 +1860,40 @@ export default function Workspace() {
             {page === "host" ? (
               <>
                 <h1>Your machines.</h1>
-                <section className="machines" aria-label="Machine load">
-                  <MachineCard
-                    name={machine.host || String(node.host_name || node.name || "This computer")}
-                    history={machine.history}
-                  />
-                  {peers.map((p) => (
-                    <PeerMachine key={p.id} id={p.id} name={p.name} />
-                  ))}
-                </section>
-                <div className="host-actions">
-                  <button
-                    onClick={() => {
-                      nav("files");
-                      void browse(".", "page");
-                    }}
-                  >
-                    <Folder />
-                    <span>
-                      <strong>Browse files</strong>
-                      <small>Open any accessible folder</small>
-                    </span>
-                    <ChevronRight />
-                  </button>
-                  <button onClick={() => void discoverApps()}>
-                    <Monitor />
-                    <span>
-                      <strong>Open an app</strong>
-                      <small>Launch on the host desktop</small>
-                    </span>
-                    <ChevronRight />
-                  </button>
-                  <button onClick={() => setModal("launch")}>
-                    <Terminal />
-                    <span>
-                      <strong>Start an agent</strong>
-                      <small>Choose an installed CLI</small>
-                    </span>
-                    <ChevronRight />
-                  </button>
-                  <button onClick={() => nav("hosts")}>
-                    <Network />
-                    <span>
-                      <strong>Connected hosts</strong>
-                      <small>{peers.length} linked</small>
-                    </span>
-                    <ChevronRight />
-                  </button>
-                </div>
-                <h2>Agent sessions</h2>
-                {agents
-                  .filter((a) => a.status !== "removed")
-                  .map((a) => (
-                    <div className="agent-row" key={a.id}>
-                      <button
-                        className="agent-open"
-                        onClick={() => {
-                          select(a.id);
-                          nav("messenger");
-                        }}
-                      >
-                        <Avatar {...look(a.id)} size={38} working={a.status === "replying"} />
-                        <span>
-                          <strong>{a.name}</strong>
-                          <small title={a.working_dir}>
-                            @{a.handle} · {folderName(a.working_dir)}
-                          </small>
-                        </span>
-                        <em className={"status-chip " + a.status}>{statusLabel(a.status)}</em>
-                      </button>
-                      <div className="agent-actions">
-                        <button className="icon-button" title="Stop" aria-label={"Stop " + a.name} onClick={() => void control(a.id, "stop")}>
-                          <Square size={16} />
-                        </button>
-                        <button className="icon-button" title="Terminate" aria-label={"Terminate " + a.name} onClick={() => void control(a.id, "terminate")}>
-                          <Power size={16} />
-                        </button>
-                        <button className="icon-button danger" title="Remove" aria-label={"Remove " + a.name} onClick={() => void control(a.id, "remove")}>
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                {agents.every((a) => a.status === "removed") && (
-                  <p className="muted">No agents running on this host.</p>
-                )}
+                <Machines
+                  machines={[
+                    {
+                      id: machines.find((n) => n.self)?.id || "local",
+                      name: machine.host || String(node.host_name || node.name || "This computer"),
+                      self: true,
+                      available: true,
+                    },
+                    ...peers.map((p) => ({
+                      id: p.id,
+                      name: p.name,
+                      self: false,
+                      available: machines.find((n) => n.id === p.id)?.available ?? true,
+                    })),
+                  ]}
+                  localHistory={machine.history}
+                  agentIDs={[...agents, ...remote].filter((a) => a.status !== "removed").map((a) => a.id)}
+                  agentRow={(id) => {
+                    const a = [...agents, ...remote].find((x) => x.id === id);
+                    return a ? agentRow(a) : null;
+                  }}
+                  run={(fn) => void action(fn)}
+                  busy={busy}
+                  onStart={startOn}
+                  onPreview={(m, p) => {
+                    setPreview(p);
+                    setPreviewOn(m.self ? null : m);
+                    setModal("preview");
+                  }}
+                  onLaunched={(m) => setNotice("Opening on " + m.name + ". Its desktop must be signed in.")}
+                />
+                <button className="control-row" onClick={() => nav("hosts")}>
+                  Hosts connected by token <ChevronRight size={17} />
+                </button>
               </>
             ) : page === "files" ? (
               <>
@@ -2147,26 +2137,31 @@ export default function Workspace() {
                 {peers.map((p) => (
                   <section className="peer-row" key={p.id}>
                     <h2>{p.name}</h2>
-                    <p>{p.url}</p>
-                    {remote
-                      .filter((a) => a.id.startsWith(p.id + "::"))
-                      .map((a) => (
-                        <button
-                          key={a.id}
-                          className="secondary"
-                          onClick={() => {
-                            select(a.id);
-                            nav("messenger");
-                          }}
-                        >
-                          <MessageCircle size={18} />
-                          {a.name}
-                        </button>
-                      ))}
-                    <p className="muted">
-                      Start agents on this host first. They will appear here
-                      automatically.
-                    </p>
+                    <p className="peer-url">{p.url}</p>
+                    {(() => {
+                      const list = remote.filter((a) => a.id.startsWith(p.id + "::"));
+                      return list.length ? (
+                        <div className="peer-agents">
+                          {list.map((a) => (
+                            <button
+                              key={a.id}
+                              className="secondary"
+                              onClick={() => {
+                                select(a.id);
+                                nav("messenger");
+                              }}
+                            >
+                              <MessageCircle size={18} />
+                              {a.name}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted">
+                          No agents on this host yet. Start one from Your machines.
+                        </p>
+                      );
+                    })()}
                   </section>
                 ))}
               </>
@@ -2539,19 +2534,40 @@ export default function Workspace() {
             files
           ) : modal === "preview" ? (
             <>
-              <Media path={preview} />
-              <button
-                className="secondary"
-                onClick={() => void open(undefined, full(preview))}
-              >
-                Open on host
-              </button>
-              <button
-                className="secondary"
-                onClick={() => setModal("transfer")}
-              >
-                Send to another host
-              </button>
+              <Media path={preview} base={previewOn ? machineBase(previewOn) : undefined} />
+              {previewOn ? (
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    void action(async () => {
+                      const r = await fetch(machineBase(previewOn) + "/host/open", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ path: full(preview) }),
+                      });
+                      if (!r.ok) throw Error((await r.text()).trim());
+                      setNotice("Opening on " + previewOn.name + ".");
+                    })
+                  }
+                >
+                  Open on {previewOn.name}
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="secondary"
+                    onClick={() => void open(undefined, full(preview))}
+                  >
+                    Open on host
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() => setModal("transfer")}
+                  >
+                    Send to another host
+                  </button>
+                </>
+              )}
             </>
           ) : modal === "group" ? (
             <form
@@ -3105,8 +3121,8 @@ function Logs({ id }: { id: string }) {
     </pre>
   );
 }
-function Media({ path }: { path: string }) {
-  const url = "/api/v1/files?path=" + encodeURIComponent(path),
+function Media({ path, base = "/api/v1" }: { path: string; base?: string }) {
+  const url = base + "/files?path=" + encodeURIComponent(path),
     ext = path.split(".").pop()?.toLowerCase() || "";
   return (
     <div className="media">

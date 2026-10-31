@@ -57,7 +57,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Long-lived routes manage their own limits.
-			for _, suffix := range []string{"/turn", "/ws", "/stream", "/transfers/receive"} {
+			for _, suffix := range []string{"/turn", "/ws", "/stream", "/transfers/receive", "/files"} {
 				if strings.HasSuffix(r.URL.Path, suffix) {
 					next.ServeHTTP(w, r)
 					return
@@ -189,6 +189,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Get("/peers/{id}/sessions", handler.peerSessions)
 		r.Post("/peers/{id}/sessions", handler.peerSessions)
 		r.Get("/peers/{id}/catalog", handler.peerCatalog)
+		r.Get("/machines/{id}/*", handler.machineProxy)
+		r.Post("/machines/{id}/*", handler.machineProxy)
 		r.Get("/transfers", handler.transfers)
 		r.Post("/transfers", handler.transfers)
 		r.Post("/transfers/receive", handler.receive)

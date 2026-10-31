@@ -3,6 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,5 +145,36 @@ func TestTheHubStartsAgentsOnAWorker(t *testing.T) {
 	}
 	if c := hub.owner(t, "GET", "/api/v1/peers/"+node+"/catalog", nil, &cat); c != 200 || len(cat.Providers) == 0 {
 		t.Fatalf("the hub should see the worker's CLIs: %d", c)
+	}
+}
+
+func TestTheHubBrowsesAWorkersFilesAndApps(t *testing.T) {
+	hub, worker, _, dir := hubAndWorker(t)
+	node := worker.s.handler.selfNode().ID
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello from the pc"), 0600)
+	get := func(path string, header map[string]string) (int, string, http.Header) {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Header.Set("Authorization", "Bearer secret-hub")
+		for k, v := range header {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		hub.s.Router().ServeHTTP(w, r)
+		return w.Code, w.Body.String(), w.Header()
+	}
+	base := "/api/v1/machines/" + node
+	code, body, _ := get(base+"/files?path="+url.QueryEscape(dir), nil)
+	if code != 200 || !strings.Contains(body, "notes.txt") {
+		t.Fatalf("the hub should list the worker's folder: %d %s", code, body)
+	}
+	code, body, h := get(base+"/files?path="+url.QueryEscape(filepath.Join(dir, "notes.txt")), map[string]string{"Range": "bytes=0-4"})
+	if code != 206 || body != "hello" || h.Get("Content-Security-Policy") != "sandbox" {
+		t.Fatalf("previews should stream with ranges and stay sandboxed: %d %q %v", code, body, h)
+	}
+	if code, _, _ := get(base+"/apps", nil); code != 200 {
+		t.Fatalf("the hub should list the worker's apps: %d", code)
+	}
+	if code, _, _ := get(base+"/rooms", nil); code != 404 {
+		t.Fatalf("only machine paths are forwarded: %d", code)
 	}
 }

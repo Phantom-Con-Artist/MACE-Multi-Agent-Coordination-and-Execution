@@ -498,11 +498,8 @@ func (h *APIHandler) signedRequest(ctx context.Context, name, base, method, path
 	if err != nil {
 		return err
 	}
-	at := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Mace-Node", h.records.Identity().ID)
-	req.Header.Set("X-Mace-Time", at)
-	req.Header.Set("X-Mace-Signature", base64.StdEncoding.EncodeToString(h.records.Identity().Sign(requestProof(method, req.URL.RequestURI(), at, data))))
+	h.sign(req, data)
 	client := &http.Client{Transport: peerTransport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := client.Do(req)
 	if err != nil {
@@ -521,6 +518,14 @@ func (h *APIHandler) signedRequest(ctx context.Context, name, base, method, path
 		return err
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 48<<20)).Decode(out)
+}
+
+// sign adds this node's signature over a request and its body.
+func (h *APIHandler) sign(req *http.Request, body []byte) {
+	at := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	req.Header.Set("X-Mace-Node", h.records.Identity().ID)
+	req.Header.Set("X-Mace-Time", at)
+	req.Header.Set("X-Mace-Signature", base64.StdEncoding.EncodeToString(h.records.Identity().Sign(requestProof(req.Method, req.URL.RequestURI(), at, body))))
 }
 
 // verifyNodeRequest checks a signed request from a joined node and returns
@@ -551,7 +556,7 @@ func (h *APIHandler) verifyNodeRequest(r *http.Request) (Node, []byte, error) {
 
 // nodeOwnerPaths are the owner's endpoints a joined machine may call on the
 // owner's behalf: agents, their turns and controls, files, and machine health.
-var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|catalog|sessions|metrics|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
+var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|catalog|sessions|metrics|files|apps|host/open|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
 
 // nodeAuthorized checks a signed request from a joined machine to an owner
 // endpoint, leaving its body readable for the handler.
