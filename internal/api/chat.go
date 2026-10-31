@@ -21,6 +21,9 @@ type Room struct {
 	Removed bool              `json:"removed,omitempty"`
 	// Flairs are custom message tags this group added beyond the standard ones.
 	Flairs []string `json:"flairs,omitempty"`
+	// Claimed holds roles agents chose for themselves, which they may change.
+	// Roles set by the owner stay authoritative.
+	Claimed map[string]string `json:"claimed,omitempty"`
 }
 type Message struct {
 	ID     string `json:"id"`
@@ -30,7 +33,9 @@ type Message struct {
 	File   string `json:"file,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	// Flair is the message's tag, such as "question" or "done".
-	Flair    string    `json:"flair,omitempty"`
+	Flair string `json:"flair,omitempty"`
+	// Role is a role the sender claimed with this message.
+	Role     string    `json:"role,omitempty"`
 	ClientID string    `json:"client_id,omitempty"`
 	At       time.Time `json:"at"`
 	// Seq is the message's position, assigned by storage.

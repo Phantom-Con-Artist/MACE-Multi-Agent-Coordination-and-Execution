@@ -602,7 +602,7 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		text = strings.TrimSpace(strings.ReplaceAll(text, "[GOAL_COMPLETE]", ""))
 	}
 	text = strings.TrimSpace(strings.ReplaceAll(text, "[PASS]", ""))
-	flair, text := h.takeFlair(ctx, req.Room, group, text)
+	flair, role, text := h.takeTags(ctx, req.Room, group, req.Member, text)
 	if flair == "done" && (p.Mode == "continuous" || p.Mode == "goal") {
 		goal = p.Mode == "goal"
 	}
@@ -612,7 +612,7 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	if stale {
 		return // The owner wrote to this agent after the turn began.
 	}
-	reply := Message{ID: newID(), Room: req.Room, Sender: req.Member, Text: text, Flair: flair, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: req.Hop + 1, Activity: res.Activity}
+	reply := Message{ID: newID(), Room: req.Room, Sender: req.Member, Text: text, Flair: flair, Role: role, At: time.Now().UTC(), Delivery: map[string]string{}, Hop: req.Hop + 1, Activity: res.Activity}
 	reply.Mentions, reply.MentionsAll = parseMentions(text, h.roomHandles(ctx, members))
 	if _, err := h.postMessage(ctx, &reply); err != nil {
 		return

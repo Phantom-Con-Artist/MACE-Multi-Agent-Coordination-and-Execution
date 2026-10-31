@@ -123,7 +123,7 @@ func TestCoworkerContextAndNativeBootstrap(t *testing.T) {
 	if prompts.Delta != "" || last != task.Seq {
 		t.Fatal("a first turn has no cursor yet, so only the full form applies")
 	}
-	for _, term := range []string{"MACE GROUP", "Ari", "Bo", "@codex", "Review accessibility", "Unassigned", "coworkers", "without waiting", "latest task stays available"} {
+	for _, term := range []string{"MACE GROUP", "Ari", "Bo", "@codex", "Review accessibility", "No role yet", "coworkers", "without waiting", "latest task stays available"} {
 		if !strings.Contains(prompt, term) {
 			t.Fatal("missing coworker context", term)
 		}

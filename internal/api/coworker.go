@@ -33,8 +33,21 @@ Work on the owner's actual task with your available native tools when needed. Ag
 const conventions = `MACE CONVENTIONS:
 - Write @handle to hand a coworker the next turn. Only mentioned coworkers respond to your message.
 - If you have nothing useful to add, reply with exactly [PASS]. It is not posted.
-- In goal mode, include [GOAL_COMPLETE] with concrete evidence only when the goal is achieved.
+- You may start a message with a flair that says what it is, such as [question], [plan], [blocker], or [done].
+- When a request is finished, start your message with [done] and one line of proof.
 `
+
+// chatStyle is how group messages should read. Casual groups write like a
+// messenger chat; professional ones stay short without slang.
+func chatStyle(tone string) string {
+	if tone == "professional" {
+		return "STYLE (professional group): one or two short, plain sentences per message. No slang, no headings, no bullet walls, no restating what others said. Go long only when the owner asks for detail or you are delivering findings, a plan, code, or a decision.\n"
+	}
+	return "STYLE: write like a group chat. One or two short lines per message; casual shorthand is fine (ik, ngl, tbh, imo, lol, lmao). No headings, no bullet walls, no restating what others said. Go long only when the owner asks for detail or you are delivering findings, a plan, code, or a decision.\n"
+}
+
+// longReply is the length after which a routine reply earns a reminder.
+const longReply = 500
 
 // awareness tells an agent who it is and where it is in Mace right now. It is
 // built on the agent's own host, from that host's conversations.
@@ -139,36 +152,86 @@ type turnPrompt struct {
 func (h *APIHandler) conversationHeader(ctx context.Context, room, member string, members []string, group *Room, p Policy) string {
 	var header strings.Builder
 	handles := h.roomHandles(ctx, members)
-	if group != nil {
-		fmt.Fprintf(&header, "THIS TURN IS FOR MACE GROUP: %s\nYou are speaking as %s (@%s).\nTeam:\n", limited(group.Name, 200), h.memberName(ctx, member), handles[member])
-		for index, other := range members {
-			if index >= 40 {
-				header.WriteString("Additional members are present.\n")
-				break
-			}
-			role := strings.TrimSpace(group.Roles[other])
-			if role == "" {
-				role = h.profileRole(ctx, other)
-			}
-			if role == "" {
-				role = "Unassigned. Responsibilities may emerge naturally."
-			}
-			fmt.Fprintf(&header, "- %s (@%s). Owner-assigned role: %s\n", h.memberName(ctx, other), handles[other], limited(role, 600))
+	if group == nil {
+		header.WriteString("THIS TURN IS FOR YOUR PRIVATE CHAT with the owner. Answer the owner's latest message naturally and directly. Keep routine replies short; go long only when the work needs it. Ask a brief clarifying question if the task needs it.\n")
+		if p.Mode == "goal" {
+			fmt.Fprintf(&header, "OWNER'S GOAL: %s\n", p.Goal)
 		}
-		header.WriteString("You are coworkers in a shared conversation, and everyone may be working at the same time. Read what the others actually said. Respond to their ideas, ask a concrete question, challenge an assumption, offer an alternative, or take a useful next step. Mention a colleague with @handle to hand them a turn; never impersonate their reply. Keep routine discussion concise and conversational; do not reprint the whole team plan or roster each time.\n")
-		if p.Mode == "continuous" {
-			header.WriteString("CONTINUOUS TEAM CONVERSATION: Continue interacting with your coworkers without waiting for another owner message. When the owner gives a task, coordinate and do useful work toward it. If no task is assigned, have an open, friendly workplace discussion, explore ideas, ask each other thoughtful questions, and let interests or roles emerge. Do not invent tasks, claim work is completed, make unrelated file changes, or get stuck in agreement/readiness loops. Build on the latest coworker's message instead of repeating your previous answer.\n")
-		}
-	} else {
-		fmt.Fprintf(&header, "THIS TURN IS FOR YOUR PRIVATE CHAT with the owner. Answer the owner's latest message naturally and directly. Ask a brief clarifying question if the task needs it.\n")
+		return header.String()
+	}
+	fmt.Fprintf(&header, "THIS TURN IS FOR MACE GROUP: %s\nYou are speaking as %s (@%s).\n", limited(group.Name, 200), h.memberName(ctx, member), handles[member])
+	if request := h.latestOwnerRequest(ctx, room); request != "" {
+		fmt.Fprintf(&header, "OWNER'S LATEST REQUEST: %q\n", limited(request, 600))
 	}
 	if p.Mode == "goal" {
-		fmt.Fprintf(&header, "OWNER'S GOAL: %s\nWork toward this goal with your coworkers. Only when the goal has been achieved, include [GOAL_COMPLETE] and concrete evidence in your reply.\n", p.Goal)
+		fmt.Fprintf(&header, "OWNER'S GOAL: %s\nWork toward this goal together. Only when it is achieved, start your message with [done] and concrete evidence.\n", limited(p.Goal, 1000))
 	}
-	if p.Mode == "reply" && group != nil {
-		fmt.Fprintf(&header, "This conversation has a total reply budget of %d. Use your turn to contribute, not to emit a generic status report.\n", p.Limit)
+	header.WriteString("TEAM:\n")
+	for index, other := range members {
+		if index >= 40 {
+			header.WriteString("Additional members are present.\n")
+			break
+		}
+		assigned := strings.TrimSpace(group.Roles[other])
+		if assigned == "" {
+			assigned = h.profileRole(ctx, other)
+		}
+		chosen := strings.TrimSpace(group.Claimed[other])
+		var role string
+		switch {
+		case assigned != "" && chosen != "":
+			role = fmt.Sprintf("Owner-assigned role: %s. Also taking on (self-chosen): %s", limited(assigned, 600), limited(chosen, 200))
+		case assigned != "":
+			role = "Owner-assigned role: " + limited(assigned, 600)
+		case chosen != "":
+			role = "Self-chosen role: " + limited(chosen, 200)
+		default:
+			role = "No role yet"
+		}
+		fmt.Fprintf(&header, "- %s (@%s). %s\n", h.memberName(ctx, other), handles[other], role)
+	}
+	header.WriteString("HOW THIS TEAM WORKS: you are coworkers on the owner's request, all able to work at once. Split the work by what each of you is best placed to do, like a real team. Roles are not fixed: when a piece of work has no owner, claim it by starting a message with [role: what you take on], and claim again when the task shifts. Owner-assigned roles come first. Don't redo work someone else claimed; hand off with @handle; never speak for a coworker. If the owner's message is just chat, answer in a line and stop.\n")
+	header.WriteString(chatStyle(p.Tone))
+	fmt.Fprintf(&header, "FLAIRS in this group: %s. You may add a new flair if it helps the request (up to %d custom).\n", "["+strings.Join(groupFlairs(group), "] [")+"]", maxCustomFlairs)
+	if n := h.lastReplyLength(ctx, room, member); n > longReply {
+		fmt.Fprintf(&header, "Your last message here was %d characters. Keep this one to a line or two unless it is a deliverable.\n", n)
+	}
+	switch p.Mode {
+	case "continuous":
+		header.WriteString("UNTIL-DONE MODE: keep working with your coworkers on the owner's latest request without waiting for another owner message. When the request is done, start your message with [done] and one line of proof. If you are waiting on someone or have nothing to add, reply [PASS]. No small talk and no new tasks of your own when there is nothing to do.\n")
+	case "reply":
+		fmt.Fprintf(&header, "This conversation has a total reply budget of %d. Use your turn to contribute, not to emit a status report.\n", p.Limit)
 	}
 	return header.String()
+}
+
+// latestOwnerRequest is the owner's newest message in a conversation.
+func (h *APIHandler) latestOwnerRequest(ctx context.Context, room string) string {
+	rows, _, _ := h.store.Messages(ctx, room, 0, 0, 40)
+	for i := len(rows) - 1; i >= 0; i-- {
+		var m Message
+		if json.Unmarshal(rows[i].Data, &m) == nil && m.Sender == "you" {
+			return strings.Join(strings.Fields(m.Text), " ")
+		}
+	}
+	return ""
+}
+
+// lastReplyLength is the length of a member's newest routine message in a
+// conversation; deliverables (plans, decisions, done reports) count as zero.
+func (h *APIHandler) lastReplyLength(ctx context.Context, room, member string) int {
+	rows, _, _ := h.store.Messages(ctx, room, 0, 0, 40)
+	for i := len(rows) - 1; i >= 0; i-- {
+		var m Message
+		if json.Unmarshal(rows[i].Data, &m) != nil || m.Sender != member {
+			continue
+		}
+		if m.Flair == "plan" || m.Flair == "decision" || m.Flair == "done" {
+			return 0
+		}
+		return len(m.Text)
+	}
+	return 0
 }
 
 func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage) string {

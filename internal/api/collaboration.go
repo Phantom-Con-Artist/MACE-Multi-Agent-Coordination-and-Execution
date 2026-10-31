@@ -12,6 +12,9 @@ type Policy struct {
 	Mode  string `json:"mode"`
 	Goal  string `json:"goal"`
 	Limit int    `json:"limit"`
+	// Tone is "casual" (the default: short, chat-style, shorthand welcome)
+	// or "professional" (short and plain, no slang).
+	Tone string `json:"tone,omitempty"`
 }
 type Run struct {
 	ID           string    `json:"id"`
@@ -49,6 +52,10 @@ func (h *APIHandler) policy(w http.ResponseWriter, r *http.Request) {
 	}
 	if p.Mode != "reply" && p.Mode != "goal" && p.Mode != "continuous" {
 		http.Error(w, "unknown conversation mode", 400)
+		return
+	}
+	if p.Tone != "" && p.Tone != "casual" && p.Tone != "professional" {
+		http.Error(w, "tone must be casual or professional", 400)
 		return
 	}
 	if p.Mode == "goal" && strings.TrimSpace(p.Goal) == "" {

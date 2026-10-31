@@ -73,3 +73,39 @@ func (h *APIHandler) takeFlair(ctx context.Context, room string, group *Room, te
 		return true
 	})
 }
+
+var rolePattern = regexp.MustCompile(`^\s*\[role:\s*([^\]\n]{1,160})\]\s*`)
+
+// takeTags strips the leading [role: ...] claim and flair from a reply, in
+// either order. A role claim in a group is recorded for every member to see.
+func (h *APIHandler) takeTags(ctx context.Context, room string, group *Room, member, text string) (flair, role, rest string) {
+	rest = text
+	for range 2 {
+		if m := rolePattern.FindStringSubmatch(rest); m != nil && group != nil && role == "" {
+			role = strings.Join(strings.Fields(m[1]), " ")
+			rest = strings.TrimSpace(rest[len(m[0]):])
+			continue
+		}
+		if flair == "" {
+			if f, r := h.takeFlair(ctx, room, group, rest); f != "" {
+				flair, rest = f, r
+				continue
+			}
+		}
+		break
+	}
+	if role != "" {
+		h.roomMu.Lock()
+		var g Room
+		if h.store.Document(ctx, "room", room, &g) == nil {
+			if g.Claimed == nil {
+				g.Claimed = map[string]string{}
+			}
+			g.Claimed[member] = role
+			h.store.PutDocument(ctx, "room", room, g)
+			h.events.publish("room", g)
+		}
+		h.roomMu.Unlock()
+	}
+	return flair, role, rest
+}
