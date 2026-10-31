@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -99,7 +102,12 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 	if !resume {
 		prompt = agentInstructions(s) + "\n" + prompt
 	}
-	prompt = h.awareness(ctx, s) + "\n" + prompt
+	aware := h.awareness(ctx, s)
+	awareHash := awarenessHash(aware)
+	if resume {
+		aware = h.compactAwareness(ctx, s, aware, awareHash)
+	}
+	prompt = aware + "\n" + prompt
 	command, args := s.Provider, ad.args(s, prompt, nativeID, resume)
 	if s.Provider == "diagnostic" {
 		command = "cat"
@@ -119,7 +127,7 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 	}
 	launch := protocol.AgentLaunchRequest{
 		Name: s.Name + " reply", Command: command, Args: args, WorkingDir: s.Directory,
-		TimeoutSeconds: int(turnLimit().Seconds()), Reserved: true,
+		TimeoutSeconds: int(turnLimit().Seconds()), Reserved: true, Env: h.contextEnv(id, p.Room),
 		Labels: map[string]string{"session": id, "origin": origin},
 		OnOutput: func(stream protocol.EventType, text string, partial bool) {
 			if stream != protocol.EventStdout {
@@ -150,7 +158,7 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 	if e != nil {
 		return turnResult{}, e
 	}
-	h.audit(id, "TURN_STARTED", proc.ID, map[string]any{"session": id, "resume": resume})
+	h.audit(id, "TURN_STARTED", proc.ID, map[string]any{"session": id, "resume": resume, "prompt_bytes": len(prompt)})
 	if s.Provider == "diagnostic" {
 		// Each reply differs, as real replies do, so loop detection stays quiet.
 		h.supervisor.SendInput(proc.ID, "Diagnostic reply "+proc.ID+". [GOAL_COMPLETE]\n")
@@ -214,6 +222,7 @@ func (h *APIHandler) runTurn(ctx context.Context, id string, p turnPrompt, origi
 	if reported != "" && s.Provider != "diagnostic" {
 		dir := s.Directory
 		h.updateSession(context.Background(), id, func(s *Session) { s.NativeSession, s.NativeDir = reported, dir })
+		h.store.PutDocument(context.Background(), "briefing", "aware|"+id, briefing{Hash: awareHash, Native: reported})
 	}
 	h.audit(id, "TURN_COMPLETED", proc.ID, map[string]any{"session": id, "steps": len(state.Steps)})
 	return turnResult{Text: reply, Activity: state.Steps, Reset: resume && reported != nativeID}, nil
@@ -248,4 +257,24 @@ func (h *APIHandler) remoteTurn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+var latestLine = regexp.MustCompile(` Latest: .*`)
+
+func awarenessHash(aware string) string {
+	sum := sha256.Sum256([]byte(latestLine.ReplaceAllString(aware, "")))
+	return hex.EncodeToString(sum[:12])
+}
+
+// compactAwareness shortens the awareness block for a resumed session that
+// already holds it: only the first line is sent again unless the agent's
+// identity, role, or conversations changed. Latest-message previews alone
+// do not count as a change.
+func (h *APIHandler) compactAwareness(ctx context.Context, s Session, aware, hash string) string {
+	var b briefing
+	if h.store.Document(ctx, "briefing", "aware|"+s.ID, &b) == nil && b.Hash == hash && b.Native == s.NativeSession {
+		first, _, _ := strings.Cut(aware, "\n")
+		return first + "\n"
+	}
+	return aware
 }

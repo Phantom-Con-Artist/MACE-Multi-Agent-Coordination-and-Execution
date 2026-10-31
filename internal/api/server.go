@@ -111,6 +111,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/catalog", handler.catalog)
+		r.Get("/ctx/{room}/{view}", handler.contextFetch)
 		r.Get("/node/identity", handler.nodeIdentity)
 		r.Get("/node/ping", handler.ping)
 		r.Post("/node/announce", handler.announced)
@@ -218,6 +219,7 @@ func (s *Server) Router() *chi.Mux {
 // Start listens and serves incoming HTTP requests until context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	var errChan = make(chan error, 1)
+	s.handler.ctx.url = localURL(s.addr, s.listener)
 	go s.handler.guardPresence(ctx)
 	go s.handler.watchMachine(ctx)
 	go s.handler.watchNodes(ctx)
@@ -239,6 +241,21 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		return err
 	}
+}
+
+// localURL is how agents on this host reach the daemon.
+func localURL(addr string, l net.Listener) string {
+	if l != nil {
+		addr = l.Addr().String()
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "0" {
+		return ""
+	}
+	if ip := net.ParseIP(host); host == "" || ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // Stop initiates a graceful shutdown of the HTTP server.

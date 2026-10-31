@@ -89,3 +89,6 @@ web/dist/
 bin/
 .artifacts/
 .playwright-mcp/
+
+# Code graph built by graphify (rebuilt locally, never committed)
+graphify-out/

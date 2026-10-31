@@ -115,6 +115,16 @@ Existing data is migrated once: each current message becomes a record owned by t
 5. Chunked files and transfers.
 6. `mace-server start` with the Tailscale HTTPS link, home-screen install, and notifications.
 
+## Context and quota
+
+Agents should spend their quota on the owner's work, not on re-reading MACE. Three parts, all built on existing pieces:
+
+- **Slim turns.** A resumed native session already holds the team header and the awareness block, so MACE hashes their stable parts and sends them again only when they change or the native session is new. The request, the room, and new messages are always sent. Measured with the test agents: a resumed group turn went from 4,120 to 571 bytes. Each turn's prompt size is logged as `prompt_bytes` on `TURN_STARTED`.
+- **Context on demand (the context DB).** The conversation store every node already keeps is the context DB. Agents fetch what they need with `mace ctx team | plan | recent [n] | thread @handle | search <words>`, served by `GET /api/v1/ctx/{room}/{view}`. Each agent process gets `MACE_CTX_URL`, `MACE_CTX_AGENT`, `MACE_CTX_CHAT`, and a read-only token derived from its session ID with a key that lives only in the daemon's memory; it can read only conversations it belongs to. Following ToolCaching (arXiv 2601.15335), fetches are read-only and keyed by their parameters, and a repeat fetch whose result has not changed for the same native session returns a one-line note instead of the same text.
+- **Code graph.** When an agent works in a git repository and graphify (`uv tool install graphifyy`) is installed, MACE builds and refreshes the repository's graph with graphify's code pass (tree-sitter, `GRAPHIFY_BACKEND=none`, so no model and no quota), at most every 30 seconds per folder, and adds `graphify-out/` to the repository's private `.git/info/exclude`. Turns then tell the agent to ask `graphify explain`, `graphify path`, or `graphify query --budget 1500` before grepping. The filesystem root and the home folder are never indexed.
+
+Still to do: workers on other machines reach the hub's context and code graph through their own node, which forwards signed requests to the hub (with hub step 4 routing); token usage reported by the CLIs, per agent and group, with a budget that pauses a run.
+
 ## Verification that needs the real environment
 
 - Two or more real machines on the owner's tailnet, including one going to sleep and returning.

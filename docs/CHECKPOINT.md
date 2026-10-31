@@ -26,6 +26,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 17. Lead-run teams (`4568782`, `7db0707`, `a2ccac0`): policy mode `team` (shown as Goal) with `lead`; Free is reply mode. Owner's unaddressed messages go to the lead, @mentions still reach a worker, workers with no mention report to the lead, `@lead` names it, `[redirect]` from the lead stops the named workers, only the lead's [done] finishes, 40-hop chains. The lead briefs the owner, posts a [plan] dividing parts by each member's CLI, model, machine, and folder (now on every team line), then integrates; workers wait for an assigned part. Live: agy led, assigned Muse the server and tests, Muse's [done] did not end the run, agy verified and finished; calculator in ~/Development/mace-playground/calc passes its tests and serves.
 
+18. Context and quota: slim resumed turns (stable header and awareness sent only when changed), `mace ctx` over the conversation store with per-agent read-only tokens and unchanged-result notes (after ToolCaching, `toolcaching.pdf` in the repo root, not committed), and graphify code graphs refreshed without a model. See "Context and quota" in docs/DESIGN-HUB-WORKER.md. graphify 0.9.99 is installed for the owner with `uv tool install "graphifyy[mcp,watch]"`; this repo's graph builds in 8 s (1241 nodes). Covered by tests; not yet run live with agy and Muse.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.

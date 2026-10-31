@@ -42,6 +42,9 @@ type APIHandler struct {
 	// turns requested by connected hosts wait for each other.
 	turnLocks sync.Map
 	machine   monitor
+	// ctx serves mace ctx fetches; graphs keeps code graphs fresh.
+	ctx    *contextService
+	graphs codeGraphs
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
@@ -86,6 +89,7 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 		events:     newHub(),
 		queues:     map[string]*memberQueue{},
 		roomRuns:   map[string]*roomRun{},
+		ctx:        newContextService(),
 	}
 	if store != nil {
 		h.ensureHandles(context.Background())

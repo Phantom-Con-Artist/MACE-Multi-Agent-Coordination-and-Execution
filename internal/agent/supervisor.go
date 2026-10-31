@@ -84,7 +84,8 @@ func (s *Supervisor) AcquireSlot(ctx context.Context) error {
 func (s *Supervisor) ReleaseSlot() { <-s.sem }
 
 // childEnv removes Mace credentials and daemon settings from the inherited
-// environment. Agents, their tools, and desktop apps never need them.
+// environment. Agents, their tools, and desktop apps never need them; the
+// only Mace settings a child gets are its own read-only MACE_CTX_ ones.
 func childEnv(extra map[string]string, tag string) []string {
 	env := []string{}
 	for _, kv := range os.Environ() {
@@ -93,7 +94,7 @@ func childEnv(extra map[string]string, tag string) []string {
 		}
 	}
 	for k, v := range extra {
-		if !strings.HasPrefix(k, "MACE_") {
+		if !strings.HasPrefix(k, "MACE_") || strings.HasPrefix(k, "MACE_CTX_") {
 			env = append(env, k+"="+v)
 		}
 	}

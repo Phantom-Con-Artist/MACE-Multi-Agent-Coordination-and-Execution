@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -145,6 +147,57 @@ func (h *APIHandler) memberName(ctx context.Context, id string) string {
 type turnPrompt struct {
 	Full  string `json:"full"`
 	Delta string `json:"delta,omitempty"`
+	// Room is the conversation the turn is for; Brief is the hash of the
+	// header's stable part, recorded once the turn succeeds.
+	Room  string `json:"room,omitempty"`
+	Brief string `json:"-"`
+}
+
+// volatileHeader marks header lines that change from turn to turn. They are
+// always sent; the rest is sent again only when it changes.
+var volatileHeader = []string{"THIS TURN IS FOR", "You are speaking as", "OWNER'S LATEST REQUEST:", "Your last message here was"}
+
+// splitHeader separates a header into its volatile lines and a hash of the rest.
+func splitHeader(header string) (volatile, brief string) {
+	var keep, rest strings.Builder
+	for _, line := range strings.SplitAfter(header, "\n") {
+		moving := false
+		for _, prefix := range volatileHeader {
+			moving = moving || strings.HasPrefix(line, prefix)
+		}
+		if moving {
+			keep.WriteString(line)
+		} else {
+			rest.WriteString(line)
+		}
+	}
+	sum := sha256.Sum256([]byte(rest.String()))
+	return keep.String(), hex.EncodeToString(sum[:12])
+}
+
+type briefing struct {
+	Hash   string `json:"hash"`
+	Native string `json:"native"`
+}
+
+// briefed reports whether an agent's current native session already holds
+// this exact header for this conversation.
+func (h *APIHandler) briefed(ctx context.Context, member, room, hash string) bool {
+	var s Session
+	var b briefing
+	if strings.Contains(member, "::") || h.store.Document(ctx, "session", member, &s) != nil || s.NativeSession == "" {
+		return false
+	}
+	return h.store.Document(ctx, "briefing", member+"|"+room, &b) == nil && b.Hash == hash && b.Native == s.NativeSession
+}
+
+// recordBriefing notes the header a local agent's native session now holds.
+func (h *APIHandler) recordBriefing(ctx context.Context, member, room, hash string) {
+	var s Session
+	if hash == "" || strings.Contains(member, "::") || h.store.Document(ctx, "session", member, &s) != nil || s.NativeSession == "" {
+		return
+	}
+	h.store.PutDocument(ctx, "briefing", member+"|"+room, briefing{Hash: hash, Native: s.NativeSession})
 }
 
 // conversationHeader describes the room and the agent's place in it.
@@ -275,7 +328,8 @@ func (h *APIHandler) transcript(ctx context.Context, rows []json.RawMessage, rea
 // fresh reports whether anyone else wrote since the agent's cursor; a first
 // turn is always fresh.
 func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members []string, group *Room, p Policy) (turnPrompt, int64, bool) {
-	header := h.conversationHeader(ctx, req.Room, req.Member, members, group, p)
+	header := h.conversationHeader(ctx, req.Room, req.Member, members, group, p) + h.codeMapLine(ctx, req.Member) + h.contextLine(req.Member)
+	volatile, brief := splitHeader(header)
 	recent, _, _ := h.store.Messages(ctx, req.Room, 0, 0, 40)
 	raw := func(rows []storage.StoredMessage) []json.RawMessage {
 		out := []json.RawMessage{}
@@ -291,14 +345,18 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	full := header + "\nSHARED CONVERSATION (oldest to newest):\n" + truncate(h.transcript(ctx, raw(recent), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	since := h.cursor(ctx, req.Member, req.Room)
 	if since == 0 {
-		return turnPrompt{Full: full}, last, true
+		return turnPrompt{Full: full, Room: req.Room, Brief: brief}, last, true
+	}
+	deltaHeader := header
+	if h.briefed(ctx, req.Member, req.Room, brief) {
+		deltaHeader = volatile + "The team, roles, and rules here are unchanged since your last turn.\n"
 	}
 	newer, more, _ := h.store.Messages(ctx, req.Room, 0, since, 40)
 	note := ""
 	if more {
 		note = "(More messages arrived than fit here; the newest are below. Ask if you need the rest.)\n"
 	}
-	delta := header + "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
+	delta := deltaHeader + "\nNEW IN THIS CONVERSATION SINCE YOUR LAST TURN (oldest to newest):\n" + note + truncate(h.transcript(ctx, raw(newer), req.Member), 72000) + "\nIt is your turn. Contribute your own next message.\n"
 	fresh := false
 	for _, row := range newer {
 		var m Message
@@ -309,7 +367,7 @@ func (h *APIHandler) buildPrompts(ctx context.Context, req *turnRequest, members
 	if len(newer) > 0 {
 		last = max(last, newer[len(newer)-1].Seq)
 	}
-	return turnPrompt{Full: full, Delta: delta}, last, fresh
+	return turnPrompt{Full: full, Delta: delta, Room: req.Room, Brief: brief}, last, fresh
 }
 
 func (h *APIHandler) available(ctx context.Context, id string) bool {

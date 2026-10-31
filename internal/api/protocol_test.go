@@ -23,6 +23,7 @@ sleep "$(cat delay 2>/dev/null || echo 0)"
 reply=$(cat reply.txt)
 if [ -e count ]; then n=$(( $(cat count) + 1 )); echo $n > count; reply="$reply $n"; fi
 printf '%s\n' "$@" >> prompts.log; echo ---- >> prompts.log
+env | grep '^MACE_' > env.log
 echo '{"event":"init","conversation_id":"conv-'$me'"}'
 echo '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"Path":"/w/plan.md"}}}}'
 printf '{"event":"result","result":{"conversation_id":"conv-%s","status":"SUCCESS","response":"%s"}}\n' "$me" "$reply"
@@ -258,10 +259,12 @@ func TestPrivateChatAndGroupShareOneCoworker(t *testing.T) {
 	if len(prompts) != 2 || !strings.Contains(prompts[1], "--conversation\nconv-ari") {
 		t.Fatal("both conversations must use the same native session")
 	}
-	for _, p := range prompts {
-		if !strings.Contains(p, "Private chat with the owner") || !strings.Contains(p, `Group "Team"`) {
-			t.Fatal("each turn should know about both conversations")
-		}
+	if !strings.Contains(prompts[0], "Private chat with the owner") || !strings.Contains(prompts[0], `Group "Team"`) {
+		t.Fatal("the session should learn about both conversations")
+	}
+	// The resumed session already holds that list, so only who it is comes again.
+	if !strings.Contains(prompts[1], "MACE AWARENESS") || strings.Contains(prompts[1], `Group "Team"`) {
+		t.Fatal("a resumed turn should not resend an unchanged conversation list")
 	}
 	if !strings.Contains(prompts[1], "THIS TURN IS FOR") {
 		t.Fatal("the turn must say which conversation it is for")

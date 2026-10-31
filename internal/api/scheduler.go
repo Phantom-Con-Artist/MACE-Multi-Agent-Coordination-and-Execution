@@ -630,6 +630,8 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		return
 	}
 	h.setCursor(ctx, req.Member, req.Room, lastSeq)
+	h.recordBriefing(ctx, req.Member, req.Room, prompts.Brief)
+	h.refreshAfterTurn(ctx, req.Member)
 	if res.Reset {
 		h.systemNote(req.Room, name+" started a fresh native session, so it may not remember earlier work in detail.")
 	}
