@@ -87,7 +87,7 @@ func (h *APIHandler) roomHandles(ctx context.Context, members []string) map[stri
 		if peer, _, remote := strings.Cut(m, "::"); remote {
 			var p Peer
 			suffix := peer
-			if h.store.Document(ctx, "peer", peer, &p) == nil {
+			if h.peerDoc(ctx, peer, &p) == nil {
 				suffix = slug(p.Name)
 			}
 			out[m] = out[m] + "@" + suffix

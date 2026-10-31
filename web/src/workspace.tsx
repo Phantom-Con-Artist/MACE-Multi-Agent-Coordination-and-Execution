@@ -110,7 +110,9 @@ type Msg = {
   activity?: Step[];
   flair?: string;
   role?: string;
+  origin?: string;
 };
+type MachineNode = { id: string; name: string; self?: boolean; available: boolean };
 type Entry = { name: string; path: string; directory: boolean; size: number };
 type Provider = { id: string; name: string; available: boolean };
 type Peer = { id: string; name: string; url: string };
@@ -121,8 +123,11 @@ type Run = { id: string; status: string; replies: number; error?: string; active
 const mergeMessages = (list: Msg[], incoming: Msg[]) => {
   const byID = new Map(list.map((m) => [m.id, m]));
   for (const m of incoming) byID.set(m.id, { ...byID.get(m.id), ...m });
+  // Time orders the chat, since a chat can merge messages written on another
+  // machine, which carry no position here; position breaks ties.
   return [...byID.values()].sort(
-    (a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity),
+    (a, b) =>
+      Date.parse(a.at) - Date.parse(b.at) || (a.seq ?? Infinity) - (b.seq ?? Infinity),
   );
 };
 const joinNames = (names: string[]) =>
@@ -154,6 +159,13 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   return r.json();
 }
 type Device = { id: string; name: string; last_seen: string; current?: boolean };
+// Push needs a service worker, which needs HTTPS or localhost.
+const pushSupported = () =>
+  window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window;
+const base64URLBytes = (s: string) => {
+  const raw = atob((s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+};
 // randomUUID needs a secure context, and LAN sign-in links are plain HTTP.
 const randomID = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
@@ -227,7 +239,7 @@ function Dialog({
 export default function Workspace() {
   const initial = location.hash.slice(1);
   const [page, setPage] = useState(
-      initial.startsWith("connect=") ? "messenger" : initial || "home",
+      initial.startsWith("connect") ? "messenger" : initial || "home",
     ),
     [pref, setPref] = useState<ThemePref>(themePref),
     [wallpaper, setWallpaperOn] = useState(wallpaperPref),
@@ -247,6 +259,9 @@ export default function Workspace() {
     [rooms, setRooms] = useState<Room[]>([]),
     [providers, setProviders] = useState<Provider[]>([]),
     [peers, setPeers] = useState<Peer[]>([]),
+    [machines, setMachines] = useState<MachineNode[]>([]),
+    [phoneLink, setPhoneLink] = useState<{ link: string; svg: string } | null>(null),
+    [pushOn, setPushOn] = useState(false),
     [remote, setRemote] = useState<Agent[]>([]),
     [runs, setRuns] = useState<Run[]>([]),
     [node, setNode] = useState<Record<string, unknown>>({});
@@ -468,6 +483,15 @@ export default function Workspace() {
             token: decodeURIComponent(initial.slice(8)),
           });
           history.replaceState(null, "", "#messenger");
+        } else if (initial.startsWith("connect-once=")) {
+          // A QR code or another of the owner's machines: a one-time code.
+          await api("/session", { code: decodeURIComponent(initial.slice(13)) });
+          history.replaceState(null, "", "#messenger");
+        }
+        const room = new URLSearchParams(location.search).get("room");
+        if (room) {
+          select(room);
+          history.replaceState(null, "", "/#messenger");
         }
         if (alive) await refresh();
       } catch (e) {
@@ -594,6 +618,55 @@ export default function Workspace() {
       clearInterval(id);
     };
   }, [peers.map((p) => p.id).join(",")]);
+  // A tapped notification opens its conversation in this window.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const open = (e: MessageEvent) => {
+      if (e.data?.type === "open-room" && e.data.room) {
+        select(e.data.room);
+        nav("messenger");
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", open);
+    return () => navigator.serviceWorker.removeEventListener("message", open);
+  }, []);
+  useEffect(() => {
+    if (page !== "settings" || !pushSupported()) return;
+    void navigator.serviceWorker.ready
+      .then((r) => r.pushManager.getSubscription())
+      .then((sub) => setPushOn(!!sub))
+      .catch(() => {});
+  }, [page]);
+  async function togglePush() {
+    const reg = await navigator.serviceWorker.ready;
+    const current = await reg.pushManager.getSubscription();
+    if (current) {
+      await api("/v1/push/unsubscribe", current.toJSON());
+      await current.unsubscribe();
+      setPushOn(false);
+      return;
+    }
+    if ((await Notification.requestPermission()) !== "granted")
+      throw Error("Notifications are blocked for this site. Allow them in the browser's site settings.");
+    const { key } = await api<{ key: string }>("/v1/push/key");
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: base64URLBytes(key),
+    });
+    await api("/v1/push/subscribe", sub.toJSON());
+    setPushOn(true);
+  }
+  // Joined machines and whether each is reachable, for offline notices.
+  useEffect(() => {
+    if (!connected) return;
+    const load = () =>
+      void api<MachineNode[]>("/v1/nodes")
+        .then(setMachines)
+        .catch(() => setMachines([]));
+    load();
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [connected]);
   // Load the newest page; the event stream keeps it current. Polling only
   // runs while the stream is down.
   useEffect(() => {
@@ -721,6 +794,8 @@ export default function Workspace() {
           };
         });
     });
+    // Records synced from another machine can belong to the open chat.
+    stream.addEventListener("records", () => setReloadKey((k) => k + 1));
     stream.addEventListener("metrics", (e) => {
       const m = data<{ host: string; sample: Sample }>(e);
       if (m.host === "local")
@@ -1332,6 +1407,24 @@ export default function Workspace() {
                       <MoreVertical />
                     </button>
                   </header>
+                  {(() => {
+                    const away = machines.filter(
+                      (n) =>
+                        !n.self &&
+                        !n.available &&
+                        (room ? room.members : [selected]).some((id) => id.startsWith(n.id + "::")),
+                    );
+                    return away.length ? (
+                      <div className="connection-banner offline-machine" role="status">
+                        <WifiOff size={18} />
+                        <span>
+                          {joinNames(away.map((n) => n.name))}{" "}
+                          {away.length === 1 ? "is" : "are"} offline. Agents there answer once{" "}
+                          {away.length === 1 ? "it is" : "they are"} back; messages written there show up then.
+                        </span>
+                      </div>
+                    ) : null;
+                  })()}
                   <div
                     className="messages"
                     ref={messagePane}
@@ -1413,6 +1506,7 @@ export default function Workspace() {
                             {m.sender !== "mace" && (
                               <small className="meta">
                                 {failed && <span className="meta-failed">Not delivered · </span>}
+                                {m.origin && <span className="meta-origin">on {m.origin} · </span>}
                                 {clock(m.at)}
                                 {mine && !failed && (
                                   <span
@@ -2153,11 +2247,96 @@ export default function Workspace() {
                 </section>
                 <section className="setting">
                   <div>
-                    <h2>Other machines</h2>
-                    <p>Connect using the address and token printed by MACE.</p>
+                    <h2>Notifications on this device</h2>
+                    <p>
+                      {!pushSupported()
+                        ? "Notifications need the HTTPS address that mace-server start prints, or this computer's own browser."
+                        : pushOn
+                          ? "You hear about private replies, questions, blockers, plans, decisions, and finished work."
+                          : "Get a notification when an agent needs you. Routine group chat stays quiet."}
+                    </p>
                   </div>
+                  <button
+                    className="switch-track"
+                    role="switch"
+                    aria-checked={pushOn}
+                    aria-label="Notifications on this device"
+                    disabled={!pushSupported() || busy}
+                    onClick={() => void action(togglePush)}
+                  >
+                    <span />
+                  </button>
+                </section>
+                <section className="setting phone-signin">
+                  <div>
+                    <h2>Add a phone or tablet</h2>
+                    <p>
+                      {phoneLink
+                        ? "Scan this with the other device's camera. It signs in once and stops working after ten minutes."
+                        : "Show a code that signs another device in, without sharing your access token."}
+                    </p>
+                    {phoneLink && (
+                      <figure className="signin-code">
+                        <img
+                          src={"data:image/svg+xml;utf8," + encodeURIComponent(phoneLink.svg)}
+                          alt="Sign-in code for another device"
+                          width={220}
+                          height={220}
+                        />
+                        <figcaption>{phoneLink.link.replace(/#.*/, "")}</figcaption>
+                      </figure>
+                    )}
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() =>
+                      void action(async () =>
+                        setPhoneLink(await api<{ link: string; svg: string }>("/v1/signin/qr")),
+                      )
+                    }
+                  >
+                    {phoneLink ? "New code" : "Show code"}
+                  </button>
+                </section>
+                <section className="setting devices machines">
+                  <div>
+                    <h2>Your machines</h2>
+                    <p>
+                      Machines joined with mace join. Open one to switch to it,
+                      already signed in.
+                    </p>
+                  </div>
+                  <ul>
+                    {machines.filter((n) => !n.self).map((n) => (
+                      <li key={n.id}>
+                        <span>
+                          {n.name}
+                          <small>{n.available ? "Available" : "Offline"}</small>
+                        </span>
+                        <button
+                          className="secondary"
+                          disabled={busy || !n.available}
+                          onClick={() =>
+                            void action(async () => {
+                              const { url } = await api<{ url: string }>("/v1/nodes/" + n.id + "/open", {});
+                              location.href = url;
+                            })
+                          }
+                        >
+                          Open
+                        </button>
+                      </li>
+                    ))}
+                    {!machines.some((n) => !n.self) && (
+                      <li className="muted">
+                        No other machines yet. Run <code>mace join --invite</code> here,
+                        then <code>mace join</code> on the other machine.
+                      </li>
+                    )}
+                  </ul>
                   <button className="secondary" onClick={() => nav("hosts")}>
-                    Manage hosts
+                    Hosts connected by token
                   </button>
                 </section>
                 <section className="setting devices">

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -70,20 +71,31 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	if handler.fileRoot == "" {
 		handler.fileRoot = "/"
 	}
-	signIns := &devices{store: store, secret: cfg.AuthSecret}
+	signIns := &devices{store: store, secret: cfg.AuthSecret, node: handler.nodeAuthorized}
 	if cfg.AuthSecret != "" {
 		r.Use(signIns.middleware)
 	}
 	r.Post("/api/session", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Token string `json:"token"`
+			Code  string `json:"code"`
 		}
-		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil || subtle.ConstantTimeCompare([]byte(body.Token), []byte(cfg.AuthSecret)) != 1 {
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body) != nil {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
 		if store == nil {
 			http.Error(w, "storage unavailable", 503)
+			return
+		}
+		// A one-time code from a QR or another machine stands in for the token.
+		if body.Code != "" {
+			if !handler.spendSignInCode(r.Context(), body.Code) {
+				http.Error(w, "That sign-in link has expired or was already used. Get a new one.", 401)
+				return
+			}
+		} else if subtle.ConstantTimeCompare([]byte(body.Token), []byte(cfg.AuthSecret)) != 1 {
+			http.Error(w, "unauthorized", 401)
 			return
 		}
 		// Opening the sign-in link again keeps this browser's existing device.
@@ -124,6 +136,9 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/nodes/join", handler.join)
 		r.Post("/nodes/accept", handler.accept)
 		r.Post("/nodes/{id}/remove", handler.removeNode)
+		r.Post("/nodes/{id}/open", handler.openNode)
+		r.Post("/node/signin", handler.nodeSignIn)
+		r.Get("/signin/qr", handler.signInQR)
 		r.Get("/devices", signIns.list)
 		r.Post("/devices/{id}/revoke", signIns.revoke)
 		r.Get("/sessions", handler.sessions)
@@ -164,6 +179,11 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Get("/transfers", handler.transfers)
 		r.Post("/transfers", handler.transfers)
 		r.Post("/transfers/receive", handler.receive)
+		r.Post("/transfers/fetch", handler.fetchTransfer)
+		r.Get("/blobs/{hash}", handler.blob)
+		r.Get("/push/key", handler.pushKey)
+		r.Post("/push/subscribe", handler.pushSubscribe)
+		r.Post("/push/unsubscribe", handler.pushSubscribe)
 		r.Get("/files", handler.files)
 		r.Get("/rooms", handler.rooms)
 		r.Post("/rooms", handler.rooms)
@@ -188,6 +208,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	if webDir == "" {
 		webDir = "web/dist"
 	}
+	// The install manifest needs its own type for home-screen install.
+	mime.AddExtensionType(".webmanifest", "application/manifest+json")
 	r.Handle("/*", http.FileServer(http.Dir(webDir)))
 
 	srv := &Server{
@@ -220,6 +242,11 @@ func (s *Server) Router() *chi.Mux {
 func (s *Server) Start(ctx context.Context) error {
 	var errChan = make(chan error, 1)
 	s.handler.ctx.url = localURL(s.addr, s.listener)
+	if host, _, err := net.SplitHostPort(s.addr); err == nil && s.listener == nil {
+		s.handler.bindHost = host
+	} else if s.listener != nil {
+		s.handler.bindHost, _, _ = net.SplitHostPort(s.listener.Addr().String())
+	}
 	go s.handler.guardPresence(ctx)
 	go s.handler.watchMachine(ctx)
 	go s.handler.watchNodes(ctx)

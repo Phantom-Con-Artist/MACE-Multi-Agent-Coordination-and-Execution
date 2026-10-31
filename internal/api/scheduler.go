@@ -613,7 +613,9 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		if prompts.Delta != "" {
 			prompts.Delta += links
 		}
-		res, err = h.peerTurn(ctx, peer, id, prompts)
+		if err = h.awaitMachine(ctx, req.Room, peer); err == nil {
+			res, err = h.peerTurn(ctx, peer, id, prompts)
+		}
 	} else {
 		res, err = h.turn(ctx, req.Member, prompts, "local", live)
 	}
@@ -776,6 +778,9 @@ func (h *APIHandler) postMessage(ctx context.Context, m *Message) (int64, error)
 	m.Seq = seq
 	h.recordMessage(ctx, m)
 	h.events.publish("message", m)
+	if subs, _ := h.store.Documents(ctx, "push"); len(subs) > 0 {
+		go h.notify(*m)
+	}
 	return seq, nil
 }
 

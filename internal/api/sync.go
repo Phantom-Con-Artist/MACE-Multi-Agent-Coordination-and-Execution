@@ -140,6 +140,9 @@ func (h *APIHandler) syncFrom(ctx context.Context, peer Node) (int, error) {
 		}
 		n, err := h.fetchChain(ctx, peer, head, local, key)
 		added += n
+		if n > 0 {
+			h.events.publish("records", map[string]string{"conversation": head.Conversation, "node": head.Node})
+		}
 		if err != nil {
 			problems = append(problems, err)
 		}

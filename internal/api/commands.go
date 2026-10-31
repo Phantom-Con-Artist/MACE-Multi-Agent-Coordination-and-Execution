@@ -67,7 +67,7 @@ func (h *APIHandler) command(w http.ResponseWriter, r *http.Request) {
 
 	if peer, remoteID, remote := strings.Cut(id, "::"); remote {
 		var p Peer
-		if h.store.Document(r.Context(), "peer", peer, &p) != nil {
+		if h.peerDoc(r.Context(), peer, &p) != nil {
 			http.Error(w, "That host is not connected.", 404)
 			return
 		}
@@ -278,7 +278,7 @@ func (h *APIHandler) models(w http.ResponseWriter, r *http.Request) {
 	id := routeParam(r, "id")
 	if peer, remoteID, remote := strings.Cut(id, "::"); remote {
 		var p Peer
-		if h.store.Document(r.Context(), "peer", peer, &p) != nil {
+		if h.peerDoc(r.Context(), peer, &p) != nil {
 			http.Error(w, "That host is not connected.", 404)
 			return
 		}

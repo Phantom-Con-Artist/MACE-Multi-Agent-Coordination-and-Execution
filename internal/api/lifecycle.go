@@ -23,7 +23,7 @@ func (h *APIHandler) controlSession(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(id, "::") {
 		parts := strings.SplitN(id, "::", 2)
 		var p Peer
-		if h.store.Document(r.Context(), "peer", parts[0], &p) != nil {
+		if h.peerDoc(r.Context(), parts[0], &p) != nil {
 			http.Error(w, "host unavailable", 404)
 			return
 		}

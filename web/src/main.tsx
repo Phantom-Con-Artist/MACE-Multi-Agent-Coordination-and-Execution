@@ -12,3 +12,8 @@ createRoot(document.getElementById("root")!).render(
     <Workspace />
   </React.StrictMode>,
 );
+
+// The service worker makes MACE installable and carries notifications. It
+// needs a secure context: HTTPS (mace-server start) or localhost.
+if ("serviceWorker" in navigator && window.isSecureContext)
+  void navigator.serviceWorker.register("/sw.js").catch(() => {});

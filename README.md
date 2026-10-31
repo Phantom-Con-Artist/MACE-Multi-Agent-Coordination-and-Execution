@@ -11,7 +11,7 @@ Once installed, run:
 mace start
 ~~~
 
-The terminal prints the MACE banner, version, local and LAN sign-in links, access token, and log location. Open a sign-in link; it connects the browser automatically. No token-generation commands or agent launch forms are needed. The public landing page, illustrated setup, Manual, Docs, Troubleshoot, and About remain explorable before sign-in. The interface uses shadcn components, Lucide icons, a self-hosted font, and original Codex Imagen artwork.
+The terminal prints the MACE banner, version, local and LAN sign-in links, access token, and log location. Open a sign-in link; it connects the browser automatically. No token-generation commands or agent launch forms are needed. The public landing page, illustrated setup, Manual, Docs, Troubleshoot, and About remain explorable before sign-in. The interface uses shadcn components, Lucide icons, a self-hosted font, and original vector artwork.
 
 In Chats, tap **+** and choose an installed agent. New sessions default to filesystem root **/**. Tap **Change** to browse to another folder, or choose **Start agent here** while browsing Host files. Multiple instances are named automatically.
 
@@ -35,7 +35,35 @@ Each browser keeps its own sign-in. Settings lists signed-in devices and lets yo
 
 Host provides file browsing, text/media inspection, desktop app discovery and launch, and agent controls. Activity shows conversation state, audit events, native stdout/stderr, and file transactions.
 
-To collaborate across machines, run Mace on each host, connect the other address and token in Connected hosts, and add its agents to your groups. Local agents receive file paths directly. Remote attachments are copied through Mace with SHA-256 verification, up to 32 MiB each. Both hosts must be reachable through LAN, Tailnet, or your configured private network.
+## Your machines: a hub and workers
+
+Every machine you use runs MACE and keeps its own data. One of them is the hub your phone opens; the others are workers whose agents join your chats. All of them must be on the same Tailscale tailnet.
+
+On the hub (once Tailscale is up):
+
+~~~sh
+sudo tailscale set --operator=$USER   # once, so MACE may publish over HTTPS
+mace-server start                     # starts MACE, serves it at https://<machine>.<tailnet>.ts.net
+~~~
+
+It prints a QR code. Scan it with your phone: it signs in once, without the access token, and stops working after ten minutes. Then use Add to Home Screen. `mace-server qr` prints a fresh code; Settings, Add a phone or tablet, shows one too. HTTPS needs MagicDNS and HTTPS certificates turned on in the Tailscale admin console.
+
+On each worker:
+
+~~~sh
+mace start                            # or mace setup, to run it as a background service
+mace join <hub address> <code>        # the code comes from mace join --invite on the hub
+~~~
+
+Joining happens once per machine. After that the worker's agents appear in the hub's agent list, can be added to groups, and answer through the hub; the hub signs every request with its machine key. Chatting with a worker's agent from the hub and directly on the worker shows one history on both, marked with the machine each message came from. Files move between machines as SHA-256 chunks, so a dropped connection resumes and there is no size limit. When a machine is offline, chats say so and its agents answer once it is back. Settings, Your machines, opens another machine already signed in. `mace machines` lists them and who is available.
+
+Notifications: in Settings, turn on Notifications on this device. You hear about private replies, questions, blockers, plans, decisions, and finished work; routine group chat stays quiet. They need the HTTPS address from mace-server start.
+
+Hosts that are not joined can still be connected the older way, by address and access token, under Settings, Your machines, Hosts connected by token.
+
+## Context and quota
+
+Agents spend quota on your work, not on re-reading MACE. A resumed agent gets the team, roles, and rules again only when they change. It can fetch more on demand with `mace ctx team | plan | recent | thread @handle | search <words>`, which repeats nothing it already has. If graphify is installed (`uv tool install graphifyy`), agents working in a git repository also get a code graph to query before grepping; MACE builds it without any model calls.
 
 ~~~sh
 mace status
@@ -48,6 +76,9 @@ mace logs --follow
 mace restart
 mace version
 mace pause-all          # stop all agent work here and on connected hosts
+mace join --invite      # print a one-time code for adding another machine
+mace machines           # joined machines and who is available
+mace-server start       # run this machine as the hub, over tailnet HTTPS, with a QR code
 mace stop
 mace kill
 maced                  # foreground daemon

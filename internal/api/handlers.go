@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"mace/internal/agent"
+	"mace/internal/blobs"
 	"mace/internal/records"
 	"mace/internal/storage"
 	"mace/pkg/protocol"
@@ -45,6 +46,13 @@ type APIHandler struct {
 	// ctx serves mace ctx fetches; graphs keeps code graphs fresh.
 	ctx    *contextService
 	graphs codeGraphs
+	// blobs holds chunks of files moving between machines.
+	blobs     *blobs.Store
+	blobsErr  error
+	blobsOnce sync.Once
+	push      pushState
+	// bindHost is the address the server listens on, set when it starts.
+	bindHost string
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {

@@ -52,6 +52,10 @@ func env(key, fallback string) string {
 	return fallback
 }
 func main() {
+	run := run
+	if filepath.Base(os.Args[0]) == "mace-server" {
+		run = serverCommand
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "mace:", err)
 		os.Exit(1)
@@ -554,7 +558,7 @@ func (c settings) doctor() error {
 }
 func help() {
 	bootstrap.Brand()
-	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  setup [--port 8080] [--remove]        Run MACE as a background service\n  join --invite                         Print a code for adding another machine\n  join <address> <code>                 Add this machine to your other machines\n  machines                              List joined machines and who is available\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  ctx <view> [words]                    Fetch conversation context during an agent turn\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
+	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  setup [--port 8080] [--remove]        Run MACE as a background service\n  join --invite                         Print a code for adding another machine\n  join <address> <code>                 Add this machine to your other machines\n  machines                              List joined machines and who is available\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  server start|qr|status|stop           Run this machine as the hub your phone opens (also mace-server)\n  ctx <view> [words]                    Fetch conversation context during an agent turn\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
 }
 func run(args []string) error {
 	command := "help"
@@ -580,6 +584,9 @@ func run(args []string) error {
 	}
 	if command == "ctx" {
 		return contextFetch(args)
+	}
+	if command == "server" {
+		return serverCommand(args)
 	}
 	c, e := loadSettings(args)
 	if e != nil {

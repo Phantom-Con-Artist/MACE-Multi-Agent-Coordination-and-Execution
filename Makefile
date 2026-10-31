@@ -10,5 +10,6 @@ test:
 install: build
 	install -d $(PREFIX)/bin
 	install -m 755 bin/mace bin/maced $(PREFIX)/bin/
+	ln -sf mace $(PREFIX)/bin/mace-server
 	install -d $(PREFIX)/share/mace/web
 	cp -R web/dist/. $(PREFIX)/share/mace/web/

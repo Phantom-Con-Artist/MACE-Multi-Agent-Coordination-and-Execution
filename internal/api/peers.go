@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,14 +17,64 @@ import (
 	"time"
 )
 
+// Peer is another machine whose agents can join this one's conversations.
+// Joined nodes are peers whose requests are signed with the node key; hosts
+// connected the older way carry an access token instead.
 type Peer struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	URL   string `json:"url"`
 	Token string `json:"token,omitempty"`
+	// Node is set for a joined machine; its ID is the node ID.
+	Node string `json:"node,omitempty"`
+}
+
+// peerDoc loads a peer by ID: a host connected with a token, or a joined node.
+func (h *APIHandler) peerDoc(ctx context.Context, id string, p *Peer) error {
+	if err := h.store.Document(ctx, "peer", id, p); err == nil {
+		return nil
+	}
+	var n Node
+	if err := h.store.Document(ctx, "node", id, &n); err != nil || !n.valid() {
+		return errors.New("host unavailable")
+	}
+	*p = nodePeer(n)
+	return nil
+}
+
+func nodePeer(n Node) Peer { return Peer{ID: n.ID, Name: n.Name, URL: n.URL, Node: n.ID} }
+
+// allPeers lists joined nodes, then hosts connected with a token.
+func (h *APIHandler) allPeers(ctx context.Context) []Peer {
+	out := []Peer{}
+	for _, n := range h.knownNodes(ctx) {
+		out = append(out, nodePeer(n))
+	}
+	raw, _ := h.store.Documents(ctx, "peer")
+	for _, b := range raw {
+		var p Peer
+		if json.Unmarshal(b, &p) == nil {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (h *APIHandler) peerRequest(ctx context.Context, p Peer, path string, body any, result any) error {
+	timeout := 55 * time.Second
+	switch {
+	case strings.HasSuffix(path, "/turn"):
+		timeout = turnLimit() + time.Minute
+	case strings.HasPrefix(path, "/transfers/fetch"):
+		timeout = transferLimit
+	}
+	if p.Node != "" {
+		method := "GET"
+		if body != nil {
+			method = "POST"
+		}
+		return h.signedRequest(ctx, p.Name, p.URL, method, "/api/v1"+path, body, result, timeout)
+	}
 	var data []byte
 	var e error
 	method := "GET"
@@ -40,10 +91,6 @@ func (h *APIHandler) peerRequest(ctx context.Context, p Peer, path string, body 
 	}
 	req.Header.Set("Authorization", "Bearer "+p.Token)
 	req.Header.Set("Content-Type", "application/json")
-	timeout := 55 * time.Second
-	if strings.HasSuffix(path, "/turn") {
-		timeout = turnLimit() + time.Minute
-	}
 	client := http.Client{Timeout: timeout, Transport: peerTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, e := client.Do(req)
 	if e != nil {
@@ -58,17 +105,9 @@ func (h *APIHandler) peerRequest(ctx context.Context, p Peer, path string, body 
 }
 func (h *APIHandler) peers(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		raw, e := h.store.Documents(r.Context(), "peer")
-		if e != nil {
-			http.Error(w, e.Error(), 500)
-			return
-		}
-		out := []Peer{}
-		for _, b := range raw {
-			var p Peer
-			json.Unmarshal(b, &p)
-			p.Token = ""
-			out = append(out, p)
+		out := h.allPeers(r.Context())
+		for i := range out {
+			out[i].Token = ""
 		}
 		writeJSON(w, 200, out)
 		return
@@ -103,7 +142,7 @@ func (h *APIHandler) peers(w http.ResponseWriter, r *http.Request) {
 }
 func (h *APIHandler) peerSessions(w http.ResponseWriter, r *http.Request) {
 	var p Peer
-	if h.store.Document(r.Context(), "peer", routeParam(r, "id"), &p) != nil {
+	if h.peerDoc(r.Context(), routeParam(r, "id"), &p) != nil {
 		http.Error(w, "host unavailable", 404)
 		return
 	}
@@ -121,7 +160,7 @@ func (h *APIHandler) peerSessions(w http.ResponseWriter, r *http.Request) {
 }
 func (h *APIHandler) peerTurn(ctx context.Context, peer, id string, prompts turnPrompt) (turnResult, error) {
 	var p Peer
-	if e := h.store.Document(ctx, "peer", peer, &p); e != nil {
+	if e := h.peerDoc(ctx, peer, &p); e != nil {
 		return turnResult{}, e
 	}
 	var out turnResult
@@ -150,8 +189,18 @@ type FilePayload struct {
 func (h *APIHandler) transfer(ctx context.Context, peer, path string) (string, error) {
 	h.audit("you", "FILE_TRANSFER_REQUESTED", peer, map[string]any{"source": path})
 	var p Peer
-	if e := h.store.Document(ctx, "peer", peer, &p); e != nil {
+	if e := h.peerDoc(ctx, peer, &p); e != nil {
 		return "", e
+	}
+	if p.Node != "" {
+		dest, m, e := h.sendChunked(ctx, p, path)
+		if e != nil {
+			return "", e
+		}
+		t := Transfer{ID: newID(), Peer: peer, Source: path, Destination: dest, Bytes: int(m.Size), SHA256: m.ID(), Status: "completed", At: time.Now().UTC()}
+		h.store.PutDocument(ctx, "transfer", t.ID, t)
+		h.audit("you", "FILE_TRANSFERRED", t.ID, map[string]any{"peer": peer, "bytes": m.Size, "manifest": m.ID(), "chunks": len(m.Chunks)})
+		return dest, nil
 	}
 	root, e := os.OpenRoot(h.fileRoot)
 	if e != nil {
@@ -265,4 +314,29 @@ func (h *APIHandler) receive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, map[string]string{"path": filepath.Join(h.fileRoot, path), "sha256": digest})
+}
+
+// awaitMachine holds a turn for an agent on a joined machine that is offline
+// until the machine is back, so the owner's message is answered rather than
+// lost. Pausing or stopping the conversation ends the wait.
+func (h *APIHandler) awaitMachine(ctx context.Context, room, peer string) error {
+	var p Peer
+	if h.peerDoc(ctx, peer, &p) != nil || p.Node == "" || h.nodeAvailable(p.Node) {
+		return nil
+	}
+	h.systemNote(room, p.Name+" is offline. Its agents answer when it is back.")
+	deadline := time.Now().Add(turnLimit())
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for !h.nodeAvailable(p.Node) {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s stayed offline", p.Name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+	return nil
 }

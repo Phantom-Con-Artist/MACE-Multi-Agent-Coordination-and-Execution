@@ -118,14 +118,9 @@ func (h *APIHandler) pauseAll(w http.ResponseWriter, r *http.Request) {
 	forwarded := r.URL.Query().Get("forwarded") == "1"
 	peers := map[string]string{}
 	if !forwarded {
-		raw, _ := h.store.Documents(r.Context(), "peer")
 		var wg sync.WaitGroup
 		var mu sync.Mutex
-		for _, b := range raw {
-			var p Peer
-			if json.Unmarshal(b, &p) != nil {
-				continue
-			}
+		for _, p := range h.allPeers(r.Context()) {
 			wg.Add(1)
 			go func(p Peer) {
 				defer wg.Done()

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,6 +52,9 @@ type Message struct {
 	// Record is the ID of this message's record: the SHA-256 of its signed
 	// envelope, used to fetch it from the node that wrote it.
 	Record string `json:"record,omitempty"`
+	// Origin names the machine a message was written on, when it is not
+	// this one. Such messages are read-only copies merged from records.
+	Origin string `json:"origin,omitempty"`
 }
 
 func newID() string { b := make([]byte, 16); rand.Read(b); return hex.EncodeToString(b) }
@@ -117,6 +121,19 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 				m.Seq = row.Seq
 				out = append(out, m)
 			}
+		}
+		if before == 0 && after == 0 {
+			// The newest page also carries the other machines' side of the chat.
+			seen := map[string]bool{}
+			for _, m := range out {
+				seen[m.ID] = true
+			}
+			for _, m := range h.foreignMessages(r.Context(), id) {
+				if !seen[m.ID] {
+					out = append(out, m)
+				}
+			}
+			slices.SortStableFunc(out, func(a, b Message) int { return a.At.Compare(b.At) })
 		}
 		w.Header().Set("X-More", strconv.FormatBool(more))
 		writeJSON(w, 200, out)

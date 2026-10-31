@@ -28,6 +28,8 @@ Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the fronten
 
 18. Context and quota: slim resumed turns (stable header and awareness sent only when changed), `mace ctx` over the conversation store with per-agent read-only tokens and unchanged-result notes (after ToolCaching, `toolcaching.pdf` in the repo root, not committed), and graphify code graphs refreshed without a model. See "Context and quota" in docs/DESIGN-HUB-WORKER.md. graphify 0.9.99 is installed for the owner with `uv tool install "graphifyy[mcp,watch]"`; this repo's graph builds in 8 s (1241 nodes). Covered by tests; not yet run live with agy and Muse.
 
+19. Hub and worker steps 4 to 6 (see the build order in docs/DESIGN-HUB-WORKER.md): joined nodes as signed peers, merged chat history across machines, offline notices and held turns, chunked content-addressed transfers, mace-server with tailnet HTTPS and QR sign-in, one-time sign-in codes, home-screen install, Web Push notifications, and a machine switcher. Covered by tests over real HTTP between two daemons in one process, and a phone-width check of Settings on an isolated scratch server. Not run across real machines, real tailscale serve, or real push services.
+
 ## Not yet verified
 
 - Claude Code and Codex adapters live (agy and muse were verified live), including `/model` on them.
@@ -45,7 +47,7 @@ Orchestration (owner priority): workers see less (plan, messages to them, lead b
 Open issues seen: a group with a remote member still needs the older peer link (node routing is part of hub step 4); the start banner prints a 127.0.0.1 link even when the server binds only to the tailnet address.
 
 
-Follow the build order in docs/DESIGN-HUB-WORKER.md:
+The build order in docs/DESIGN-HUB-WORKER.md is done through step 6 in code. Next is the owner's real two-machine test (laptop as hub with mace-server start, the PC as worker with mace join), then the remaining items below. The older build-order notes follow for reference:
 
 4. Hub, rest of the step: the interface reads `GET /records/{conversation}` instead of messages, agents from every node in one list, the owner's actions routed to the owning node (node-signed, which widens node auth beyond `/api/v1/node/`), offline gaps shown in chats. Sync is done.
 5. Chunked, content-addressed files and transfers (absorbs the transfer part of phase 3).

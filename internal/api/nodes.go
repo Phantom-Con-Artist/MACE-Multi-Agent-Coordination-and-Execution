@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -476,6 +477,12 @@ func requestProof(method, path, at string, body []byte) []byte {
 
 // nodeRequest sends a signed request to a node and decodes the answer.
 func (h *APIHandler) nodeRequest(ctx context.Context, n Node, method, path string, body, out any) error {
+	return h.signedRequest(ctx, n.Name, n.URL, method, path, body, out, 0)
+}
+
+// signedRequest sends a request signed with this node's key. A zero timeout
+// leaves the request bounded only by its context.
+func (h *APIHandler) signedRequest(ctx context.Context, name, base, method, path string, body, out any, timeout time.Duration) error {
 	if h.records == nil {
 		return errors.New("this machine has no node identity")
 	}
@@ -486,7 +493,7 @@ func (h *APIHandler) nodeRequest(ctx context.Context, n Node, method, path strin
 			return err
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, n.URL+path, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, method, base+path, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -495,17 +502,22 @@ func (h *APIHandler) nodeRequest(ctx context.Context, n Node, method, path strin
 	req.Header.Set("X-Mace-Node", h.records.Identity().ID)
 	req.Header.Set("X-Mace-Time", at)
 	req.Header.Set("X-Mace-Signature", base64.StdEncoding.EncodeToString(h.records.Identity().Sign(requestProof(method, req.URL.RequestURI(), at, data))))
-	res, err := (&http.Client{Transport: peerTransport}).Do(req)
+	client := &http.Client{Transport: peerTransport, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode > 299 {
 		msg, _ := io.ReadAll(io.LimitReader(res.Body, 1000))
-		return &nodeRefused{node: n.Name, status: res.StatusCode, msg: strings.TrimSpace(string(msg))}
+		return &nodeRefused{node: name, status: res.StatusCode, msg: strings.TrimSpace(string(msg))}
 	}
 	if out == nil {
 		return nil
+	}
+	if w, ok := out.(io.Writer); ok {
+		_, err = io.Copy(w, res.Body)
+		return err
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 48<<20)).Decode(out)
 }
@@ -534,6 +546,28 @@ func (h *APIHandler) verifyNodeRequest(r *http.Request) (Node, []byte, error) {
 		return n, nil, errors.New("invalid signature")
 	}
 	return n, body, nil
+}
+
+// nodeOwnerPaths are the owner's endpoints a joined machine may call on the
+// owner's behalf: agents, their turns and controls, files, and machine health.
+var nodeOwnerPaths = regexp.MustCompile(`^/api/v1/(node|sessions|metrics|pause-all|transfers/(receive|fetch)|blobs/[0-9a-f]{64}|sessions/[^/]+/(turn|control|command|models|profile))$`)
+
+// nodeAuthorized checks a signed request from a joined machine to an owner
+// endpoint, leaving its body readable for the handler.
+func (h *APIHandler) nodeAuthorized(r *http.Request) bool {
+	if strings.HasPrefix(r.URL.Path, "/api/v1/node/") {
+		// Node protocol handlers check signatures themselves.
+		return true
+	}
+	if !nodeOwnerPaths.MatchString(r.URL.Path) {
+		return false
+	}
+	_, body, err := h.verifyNodeRequest(r)
+	if err != nil {
+		return false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return true
 }
 
 // nodeRefused is a node's non-success answer.

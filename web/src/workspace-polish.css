@@ -1739,3 +1739,29 @@
   color: var(--muted);
   font-size: var(--font-small);
 }
+
+.app .meta-origin {
+  color: var(--muted);
+}
+.app .offline-machine {
+  border-top: 1px solid var(--line);
+}
+
+.app .signin-code {
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.app .signin-code img {
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+  width: min(220px, 60vw);
+  height: auto;
+}
+.app .signin-code figcaption {
+  font-size: var(--font-secondary);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"mace/internal/records"
 	"mace/internal/storage"
@@ -94,4 +96,77 @@ func (h *APIHandler) recordMessage(ctx context.Context, m *Message) {
 	}
 	m.Record = r.ID
 	h.store.UpdateMessage(ctx, m.ID, m)
+}
+
+// One conversation with an agent can live on two machines: the owner talks
+// to a worker's agent from the hub (the hub's conversation "<worker>::<id>")
+// and directly on the worker (the worker's conversation "<id>"). Each machine
+// writes its own records; synced records from the other side are merged into
+// the chat as read-only messages marked with the machine they came from.
+
+// counterpart names the other machine's side of a private chat with an
+// agent: its node ID and its conversation ID.
+func (h *APIHandler) counterparts(ctx context.Context, room string) map[string]string {
+	out := map[string]string{}
+	if node, id, remote := strings.Cut(room, "::"); remote {
+		var n Node
+		if h.store.Document(ctx, "node", node, &n) == nil {
+			out[node] = id
+		}
+		return out
+	}
+	var s Session
+	if h.store.Document(ctx, "session", room, &s) != nil {
+		return out
+	}
+	self := h.selfNode().ID
+	for _, n := range h.knownNodes(ctx) {
+		out[n.ID] = self + "::" + room
+	}
+	return out
+}
+
+// foreignMessages are the other machines' records of a private chat with an
+// agent, as messages in this machine's terms.
+func (h *APIHandler) foreignMessages(ctx context.Context, room string) []Message {
+	out := []Message{}
+	if h.records == nil {
+		return out
+	}
+	local, agent, remote := strings.Cut(room, "::")
+	for node, conversation := range h.counterparts(ctx, room) {
+		list, err := h.records.Conversation(ctx, conversation)
+		if err != nil {
+			continue
+		}
+		var n Node
+		h.store.Document(ctx, "node", node, &n)
+		for _, rec := range list {
+			if rec.Node != node || rec.Kind != "message" {
+				continue
+			}
+			var body struct {
+				Message  string     `json:"message"`
+				Text     string     `json:"text"`
+				File     string     `json:"file"`
+				Activity []Activity `json:"activity"`
+			}
+			if json.Unmarshal(rec.Body, &body) != nil || body.Message == "" {
+				continue
+			}
+			sender := rec.Author
+			switch {
+			case remote && sender == agent:
+				sender = local + "::" + agent // the worker's agent, seen from the hub
+			case !remote && strings.HasSuffix(sender, "::"+room):
+				sender = room // the hub's name for this machine's agent
+			}
+			text := body.Text
+			if body.File != "" {
+				text = strings.TrimSpace(text + "\n(file on " + n.Name + ": " + filepath.Base(body.File) + ")")
+			}
+			out = append(out, Message{ID: body.Message, Room: room, Sender: sender, Text: text, Activity: body.Activity, At: time.UnixMilli(rec.Clock.Wall).UTC(), Origin: n.Name, Record: rec.ID, Delivery: map[string]string{}})
+		}
+	}
+	return out
 }

@@ -118,7 +118,7 @@ func (h *APIHandler) knownMember(ctx context.Context, id string) bool {
 	if strings.Contains(id, "::") {
 		parts := strings.SplitN(id, "::", 2)
 		var p Peer
-		return h.store.Document(ctx, "peer", parts[0], &p) == nil && parts[1] != ""
+		return h.peerDoc(ctx, parts[0], &p) == nil && parts[1] != ""
 	}
 	var s Session
 	if h.store.Document(ctx, "session", id, &s) == nil {

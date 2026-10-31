@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const Version = "0.1.0"
@@ -55,7 +56,12 @@ func Banner(token, host string, port int, log string) {
 		}
 		fmt.Printf("Tailnet address: http://%s:%d/#connect=%s\n", name, port, token)
 	}
-	fmt.Printf("Open this computer: http://127.0.0.1:%d/#connect=%s\n", port, token)
+	local := "127.0.0.1"
+	if host != "" && host != "0.0.0.0" && host != "::" {
+		// A server bound to one address answers only there.
+		local = host
+	}
+	fmt.Printf("Open this computer: http://%s/#connect=%s\n", net.JoinHostPort(local, strconv.Itoa(port)), token)
 	if host == "0.0.0.0" || host == "" {
 		if addresses, e := net.InterfaceAddrs(); e == nil {
 			for _, address := range addresses {
@@ -64,8 +70,6 @@ func Banner(token, host string, port int, log string) {
 				}
 			}
 		}
-	} else if host != "127.0.0.1" {
-		fmt.Printf("Host address: http://%s:%d/#connect=%s\n", host, port, token)
 	}
 	fmt.Printf("\nAccess token: %s\nLog: %s\n\nChoose an agent in Chats to start.\nmace status · mace stop · mace kill\n\n", token, log)
 }

@@ -393,7 +393,7 @@ func (h *APIHandler) capabilities(ctx context.Context, id string) string {
 	if peer, _, remote := strings.Cut(id, "::"); remote {
 		h.store.Document(ctx, "remote-session", id, &s)
 		var p Peer
-		if h.store.Document(ctx, "peer", peer, &p) == nil {
+		if h.peerDoc(ctx, peer, &p) == nil {
 			host = p.Name
 		}
 	} else {

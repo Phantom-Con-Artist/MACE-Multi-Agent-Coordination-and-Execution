@@ -191,7 +191,7 @@ func (h *APIHandler) metrics(w http.ResponseWriter, r *http.Request) {
 // peerMetrics serves GET /api/v1/peers/{id}/metrics from a connected host.
 func (h *APIHandler) peerMetrics(w http.ResponseWriter, r *http.Request) {
 	var p Peer
-	if h.store.Document(r.Context(), "peer", routeParam(r, "id"), &p) != nil {
+	if h.peerDoc(r.Context(), routeParam(r, "id"), &p) != nil {
 		http.Error(w, "That host is not connected.", 404)
 		return
 	}

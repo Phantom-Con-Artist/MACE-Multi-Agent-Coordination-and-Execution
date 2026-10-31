@@ -1,0 +1,13 @@
+{
+  "name": "MACE",
+  "short_name": "MACE",
+  "description": "Multi Agent Coordination and Execution: your CLI agents, from any screen.",
+  "start_url": "/#messenger",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#161112",
+  "theme_color": "#161112",
+  "icons": [
+    { "src": "/brand/mace-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
