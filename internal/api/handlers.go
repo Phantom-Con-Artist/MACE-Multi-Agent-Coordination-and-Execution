@@ -35,6 +35,7 @@ type APIHandler struct {
 	// turnLocks lets one native turn run per agent; local inbox turns and
 	// turns requested by connected hosts wait for each other.
 	turnLocks sync.Map
+	machine   monitor
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {

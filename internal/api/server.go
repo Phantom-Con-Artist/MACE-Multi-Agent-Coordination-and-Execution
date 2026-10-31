@@ -134,6 +134,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/chats/{room}/continue", handler.continueConversation)
 		r.Post("/pause-all", handler.pauseAll)
 		r.Get("/stream", handler.stream)
+		r.Get("/metrics", handler.metrics)
+		r.Get("/peers/{id}/metrics", handler.peerMetrics)
 		r.Post("/inbox", handler.inbox)
 		r.Get("/chats/{room}/receipts", handler.receipts)
 		r.Post("/presence", handler.presencePing)
@@ -200,6 +202,7 @@ func (s *Server) Router() *chi.Mux {
 func (s *Server) Start(ctx context.Context) error {
 	var errChan = make(chan error, 1)
 	go s.handler.guardPresence(ctx)
+	go s.handler.watchMachine(ctx)
 
 	go func() {
 		if s.listener != nil {

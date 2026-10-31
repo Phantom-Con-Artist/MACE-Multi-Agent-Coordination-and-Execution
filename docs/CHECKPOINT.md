@@ -1,43 +1,36 @@
-# MACE checkpoint
+# MACE checkpoint, 2026-10-31
 
-Saved at the owner's request on 2026-10-31. Further testing and polish stopped to preserve quota.
+Saved when quota ran low. Branch: `phase-0-hardening` (not merged to main). All Go tests pass; the frontend type-checks and builds.
 
-## Included in this commit
+## Done (commits on the branch, oldest first)
 
-- Group removal, member removal, optional member roles, and continuous discussion without a typed starting prompt.
-- Automatic MACE identity, coworker instructions, roster, role, and conversation context passed to native agents on every turn.
-- Cancelling or removing one member lets remaining group members continue.
-- Mobile workspace spacing, quieter application lists, useful empty states, readable agent Markdown, multiline composition, IME handling, drafts, and offline workspace preservation.
-- Local listener discovery with `mace ports`, `mace status --port NUMBER`, and targeted `mace stop --port NUMBER` or `mace kill --port NUMBER`. Targeted commands verify that the listener belongs to Mace.
+1. Phase 0 hardening: token never reaches child processes, oversized output drained, slot waiting, orphan reaping, idle and hard turn limits, schema versions with backups and corruption restore, idempotent sends, per-device sign-in, presence guard (agents stop when every device goes quiet), Pause everything, Interrupted plus Continue.
+2. Phase 1: per-agent inboxes, parallel dispatch, protocol v3 (@mentions, [PASS], hop limit 8, loop detection, per-message budgets with generations), one native session per agent shared across chats (agy --conversation, muse/claude --session-id, codex exec resume), live tool steps, SSE event stream, paged messages table.
+3. Brand: exact logo SVGs, Archivo, palettes Signal, Ink, Ember, Carbon, Auto (`web/src/theme.css`, `theme.ts`), messenger polish (tile avatars, unread, receipts from read cursors, @ menu, date dividers, triangle tails), decluttered UI.
+4. Agent profiles: name, handle, role (follows into groups unless a group sets one), color profiles, official marks for Claude Code and Muse (Simple Icons, CC0), owner logos in `<state>/avatars/`.
+5. Public site rebuilt with original vector art (hyperbolic tiling, `scripts/hyperbolic-art.py`); raster art removed.
+6. B3 (this commit): per-machine monitor (CPU, memory, disk, load, GPU via nvidia-smi or AMD sysfs) at `/api/v1/metrics`, streamed as `metrics` events, peer proxy `/peers/{id}/metrics`; SVG gauges, sparkline, activity bar chart; compact agent rows on Host.
 
-## Verification already completed
+## Not yet verified
 
-- Backend tests, native prompt/context tests, and API/agent race tests passed during implementation.
-- Go binaries and the production frontend built successfully during this pass.
-- A browser review captured 43 views across phone, tablet, desktop, dark theme, larger text, offline, and dialog/error states. Evidence is local under `.artifacts/ux-review/after/` and is intentionally ignored by Git.
-- That review verified multiline growth, IME composition, mobile Enter behavior, offline workspace preservation, alphabetical apps, and prevention of empty groups. It found dialog focus containment and selected-row text contrast issues; fixes were applied afterward but their browser checks have not been rerun.
-- Real agy and muse agents exchanged three autonomous replies with no owner message and no assigned roles. Their transcript and phone screenshot exist under `.artifacts/ux-review/live-team/`. The saved transcript proves participation; final cleanup/group-removal test output was not recovered before this checkpoint.
-- `git diff --check` passed immediately before saving this checkpoint.
+- Claude Code and Codex adapters live (agy and muse were verified live).
+- Peer machine monitors with a real second host. Phone hardware, Tailnet, real two-machine Wi-Fi.
+- B3 agent rows were rebuilt but the final screenshot was not reviewed before quota ran out.
 
-## Remaining verification
+## Next, in order (see docs/DESIGN-REMOTE-COWORKERS.md, "Status and remaining work")
 
-1. Update `scripts/check-browser.mjs` for the new `Save and start` continuous-mode action and capitalized run labels. Exercise role editing and group removal.
-2. Rerun `scripts/review-workspace.mjs` after the final focus/contrast changes and inspect the new member-role dialog on narrow phones.
-3. Recover or rerun the latest CLI port lifecycle test result. Do not treat the latest port-specific changes as fully verified yet.
-4. Run the Impeccable detector once on changed frontend files and review actionable findings.
-5. Run final build/tests after any further edits. Refresh installed binaries and web assets from `bin/` and `web/dist/`, then restart the user's server when ready. The user-local installation is not confirmed to contain this checkpoint.
+1. Review Host/Activity screenshots at phone width; Settings polish.
+2. `/` commands in private chats, model switching applied everywhere.
+3. Files: streaming viewer for any size, pdf.js, transfers without the 32 MiB cap.
+4. Full animated CLI (B5), then setup (phase 4), power (phase 5), Live View (phase 6).
 
-## Free old listening ports
+## Be careful
 
-Ports are freed by stopping their listening server. With the CLI built from this checkpoint:
-
-```sh
-bin/mace ports
-bin/mace stop --port 8080
-# Only if graceful stopping fails:
-bin/mace kill --port 8080
-```
-
-Replace 8080 with a port shown by `ports`. These commands refuse unrelated listeners. Use `mace` instead of `bin/mace` after refreshing the installed CLI. Do not remove databases or tokens to free a port.
-
-The earlier baseline is commit `6fc802b`. This checkpoint deliberately records remaining work rather than claiming the final review is complete.
+- Never run `bin/mace start|restart|stop` without MACE_HOME, MACE_PID_FILE, MACE_LOG_FILE pointing at a scratch folder; otherwise it acts on the owner's live server on port 8080. The owner's server is still running an early phase 0 build from a mistaken restart; the owner was told and has not asked to change it.
+- Isolated test daemon: port 18091, state in the session scratchpad (gone next session).
+- Tailwind scans class names: avoid utility names such as `ring`, `border`, `shadow` as custom classes (this caused boxed gauges).
+- Go nil slices encode as JSON null; return empty slices to the browser.
+- Audit timestamps are Go strings, not ISO; parse with the helper in `web/src/charts.tsx`.
+- No em dashes in product copy (AGENTS.md). Product name: MACE, Multi Agent Coordination and Execution.
+- Live provider calls: agy and muse are free for testing; avoid spending Claude Code or Codex quota.
+- The owner wants minimal visible controls, a messenger-grade feel, vector art only, and decisions explained briefly.

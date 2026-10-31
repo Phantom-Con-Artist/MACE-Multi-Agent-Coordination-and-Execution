@@ -13,6 +13,12 @@ import { Button } from "@/components/ui/button";
 const AgentMessage = lazy(() => import("./agent-message"));
 import { StepList, WorkCard, type Step } from "./agent-work";
 import { MaceLogo, MaceMark, WorkingPills } from "./brand";
+import { ActivityBars, MachineCard, usePeerMetrics, type Sample } from "./charts";
+
+function PeerMachine({ id, name }: { id: string; name: string }) {
+  const { history, error } = usePeerMetrics(id, true);
+  return <MachineCard name={name} history={history} error={error} />;
+}
 import {
   Avatar,
   PlainWithMentions,
@@ -254,6 +260,7 @@ export default function Workspace() {
     [inbox, setInbox] = useState<Record<string, { latest: Msg; unread: number }>>({}),
     [receipts, setReceipts] = useState<Record<string, number>>({}),
     [caret, setCaret] = useState(0),
+    [machine, setMachine] = useState<{ host: string; history: Sample[] }>({ host: "", history: [] }),
     [modal, setModal] = useState(""),
     [attachments, setAttachments] = useState<Record<string, string>>({}),
     [groupMembers, setGroupMembers] = useState<string[]>([]),
@@ -601,6 +608,12 @@ export default function Workspace() {
       .then(setReceipts)
       .catch(() => {});
   }, [selected, connected]);
+  useEffect(() => {
+    if (!connected || page !== "host") return;
+    void api<{ host: string; history: Sample[] | null }>("/v1/metrics")
+      .then((m) => setMachine({ host: m.host, history: m.history || [] }))
+      .catch(() => {});
+  }, [connected, page]);
   async function loadOlder() {
     const first = messages.find((m) => m.seq);
     const pane = messagePane.current;
@@ -650,6 +663,11 @@ export default function Workspace() {
             [m.room!]: { latest: m, unread: (prev?.unread || 0) + (counts ? 1 : 0) },
           };
         });
+    });
+    stream.addEventListener("metrics", (e) => {
+      const m = data<{ host: string; sample: Sample }>(e);
+      if (m.host === "local")
+        setMachine((v) => ({ ...v, history: [...v.history, m.sample].slice(-120) }));
     });
     stream.addEventListener("cursor", (e) => {
       const c = data<{ room: string; member: string; seq: number }>(e);
@@ -1591,11 +1609,16 @@ export default function Workspace() {
             </div>
             {page === "host" ? (
               <>
-                <h1>Your host.</h1>
-                <p className="lede">
-                  {String(node.host_name || node.name)} · {String(node.os)} ·{" "}
-                  {String(node.arch)}
-                </p>
+                <h1>Your machines.</h1>
+                <section className="machines" aria-label="Machine load">
+                  <MachineCard
+                    name={machine.host || String(node.host_name || node.name || "This computer")}
+                    history={machine.history}
+                  />
+                  {peers.map((p) => (
+                    <PeerMachine key={p.id} id={p.id} name={p.name} />
+                  ))}
+                </section>
                 <div className="host-actions">
                   <button
                     onClick={() => {
@@ -1639,39 +1662,34 @@ export default function Workspace() {
                 {agents
                   .filter((a) => a.status !== "removed")
                   .map((a) => (
-                    <div className="session-row" key={a.id}>
+                    <div className="agent-row" key={a.id}>
                       <button
+                        className="agent-open"
                         onClick={() => {
                           select(a.id);
                           nav("messenger");
                         }}
                       >
-                        <Terminal size={18} />
+                        <Avatar {...look(a.id)} size={38} working={a.status === "replying"} />
                         <span>
-                          {a.name}
-                          <small>
-                            {a.working_dir} · {a.status}
+                          <strong>{a.name}</strong>
+                          <small title={a.working_dir}>
+                            @{a.handle} · {folderName(a.working_dir)}
                           </small>
                         </span>
+                        <em className={"status-chip " + a.status}>{statusLabel(a.status)}</em>
                       </button>
-                      <button
-                        aria-label={"Stop " + a.name}
-                        onClick={() => void control(a.id, "stop")}
-                      >
-                        <Square size={17} />
-                      </button>
-                      <button
-                        aria-label={"Terminate " + a.name}
-                        onClick={() => void control(a.id, "terminate")}
-                      >
-                        <Power size={17} />
-                      </button>
-                      <button
-                        aria-label={"Remove " + a.name}
-                        onClick={() => void control(a.id, "remove")}
-                      >
-                        <Trash2 size={17} />
-                      </button>
+                      <div className="agent-actions">
+                        <button className="icon-button" title="Stop" aria-label={"Stop " + a.name} onClick={() => void control(a.id, "stop")}>
+                          <Square size={16} />
+                        </button>
+                        <button className="icon-button" title="Terminate" aria-label={"Terminate " + a.name} onClick={() => void control(a.id, "terminate")}>
+                          <Power size={16} />
+                        </button>
+                        <button className="icon-button danger" title="Remove" aria-label={"Remove " + a.name} onClick={() => void control(a.id, "remove")}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 <p className="muted">
@@ -1848,6 +1866,7 @@ export default function Workspace() {
                       </button>
                     ))}
                     <h2>Recent activity</h2>
+                    <ActivityBars times={activity.map((a) => a.at)} />
                     <label className="search">
                       <Search size={18} />
                       <input

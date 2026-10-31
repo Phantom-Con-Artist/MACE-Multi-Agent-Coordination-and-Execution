@@ -1079,3 +1079,262 @@ html[data-theme="dark"] .agent-avatar {
 .profile-form p {
   margin: 0;
 }
+
+/* ---------- Machines and activity ---------- */
+.app .machines {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  margin: 8px 0 28px;
+}
+.app .machine {
+  padding: 16px 18px 14px;
+  border-radius: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.app .machine header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.app .machine header strong {
+  font-family: var(--font-display);
+  font-stretch: 110%;
+}
+.app .machine header small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.app .machine .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.app .machine .dot.on {
+  background: #2f9e5b;
+  box-shadow: 0 0 0 4px rgb(47 158 91 / 0.15);
+}
+.app .machine-error {
+  color: var(--muted);
+  margin: 0;
+}
+.app .gauges {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.gauge {
+  position: relative;
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+}
+/* Only the gauge itself; the icon in the middle keeps its own size. */
+.gauge > svg {
+  width: 64px;
+  height: 64px;
+  transform: rotate(-90deg);
+}
+.gauge-center svg {
+  width: 15px;
+  height: 15px;
+}
+.gauge circle {
+  fill: none;
+  stroke-width: 7;
+}
+.gauge-track {
+  stroke: var(--soft);
+}
+.gauge-value {
+  stroke: var(--text);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 700ms var(--ease-out), stroke 300ms var(--ease-out);
+}
+.gauge.hot .gauge-value {
+  stroke: var(--accent);
+}
+.gauge-center {
+  position: absolute;
+  top: 0;
+  height: 64px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  color: var(--muted);
+}
+.gauge-center b {
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.1;
+}
+.gauge figcaption strong {
+  display: block;
+  font-size: 0.78rem;
+}
+.gauge figcaption small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+.app .machine-trend {
+  margin-top: 12px;
+}
+.app .machine-trend small {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.spark {
+  display: block;
+  width: 100%;
+  height: 48px;
+  margin-top: 4px;
+}
+.spark.empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.spark-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.spark-area {
+  fill: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.activity-bars {
+  margin: 4px 0 18px;
+  padding: 14px 16px 10px;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.activity-bars svg {
+  display: block;
+  width: 100%;
+  height: 64px;
+}
+.activity-bars .bar {
+  fill: var(--green);
+}
+.activity-bars .bar.empty {
+  fill: var(--soft);
+  height: 3px;
+  y: 61px;
+}
+.activity-bars figcaption {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--font-small);
+  margin-top: 6px;
+}
+@media (max-width: 420px) {
+  .app .gauges {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gauge-value {
+    transition: none;
+  }
+}
+
+/* Long folder paths wrap instead of widening the page. */
+.app .page {
+  overflow-x: hidden;
+}
+.app .page p,
+.app .page small,
+.app .page code {
+  overflow-wrap: anywhere;
+}
+.app .machines,
+.app .machine,
+.app .gauges {
+  min-width: 0;
+}
+
+/* Agent rows on the Host page: identity on the left, controls on the right. */
+.app .agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.app .agent-open {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 14px;
+  text-align: left;
+}
+.app .agent-open > span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.app .agent-open strong {
+  font-weight: 650;
+}
+.app .agent-open small {
+  color: var(--muted);
+  font-size: var(--font-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.app .status-chip {
+  flex: none;
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.app .status-chip.ready {
+  color: #2f7d4f;
+  background: color-mix(in srgb, #2f9e5b 14%, transparent);
+}
+.app .status-chip.replying {
+  color: var(--green);
+  background: var(--accent-soft);
+}
+.app .agent-actions {
+  display: flex;
+  gap: 2px;
+}
+.app .agent-actions .icon-button {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 11px;
+  color: var(--muted);
+}
+.app .agent-actions .danger:hover {
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+@media (max-width: 420px) {
+  .app .status-chip {
+    display: none;
+  }
+}
