@@ -83,7 +83,9 @@ func (n *Node) Listen(ctx context.Context) (net.Listener, error) {
 		host = "127.0.0.1"
 	}
 	addr := net.JoinHostPort(host, fmt.Sprint(n.cfg.Port))
-	var lc net.ListenConfig
+	// Short keepalives notice a vanished phone or peer in about 25 seconds, so
+	// work tied to that connection stops instead of running on unobserved.
+	lc := net.ListenConfig{KeepAliveConfig: net.KeepAliveConfig{Enable: true, Idle: 10 * time.Second, Interval: 5 * time.Second, Count: 3}}
 	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on local address %s: %w", addr, err)

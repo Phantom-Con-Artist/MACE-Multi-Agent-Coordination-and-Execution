@@ -22,11 +22,13 @@ type APIHandler struct {
 	fileRoot       string
 	lifecycleMu    sync.Mutex
 	runMu          sync.Mutex
-	runs           map[string]context.CancelFunc
+	runs           map[string]context.CancelCauseFunc
 	sessionMu      sync.Mutex
 	activeSessions map[string]bool
 	roomMu         sync.Mutex
 	activeTurns    map[string]activeTurn
+	presence       presence
+	sendMu         sync.Mutex
 }
 
 func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo protocol.NodeInfo) *APIHandler {
@@ -47,8 +49,9 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 		for _, b := range raw {
 			var run Run
 			if json.Unmarshal(b, &run) == nil && run.Status == "running" {
-				run.Status = "paused"
-				run.Error = "Host restarted. Send a task to continue."
+				run.Status = "interrupted"
+				run.ActiveMember = ""
+				run.Error = "The host restarted while agents were working. Continue when you are ready."
 				store.PutDocument(context.Background(), "run", run.ID, run)
 			}
 		}
@@ -66,8 +69,9 @@ func NewAPIHandler(supervisor *agent.Supervisor, store *storage.Store, nodeInfo 
 		store:      store,
 		nodeInfo:   nodeInfo,
 		startTime:  time.Now(),
-		runs:       make(map[string]context.CancelFunc), activeSessions: make(map[string]bool),
+		runs:       make(map[string]context.CancelCauseFunc), activeSessions: make(map[string]bool),
 		activeTurns: make(map[string]activeTurn),
+		presence:    presence{lastSeen: map[string]time.Time{}},
 	}
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -92,7 +93,7 @@ func (h *APIHandler) pause(w http.ResponseWriter, r *http.Request) {
 	h.runMu.Lock()
 	cancel := h.runs[id]
 	if cancel != nil {
-		cancel()
+		cancel(nil)
 	}
 	h.runMu.Unlock()
 	h.audit("you", "CONVERSATION_PAUSE", id, nil)
@@ -128,23 +129,31 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 	if h.runs[room] != nil {
 		return fmt.Errorf("conversation is still running; pause it before sending a new task")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	h.runs[room] = cancel
 	p := Policy{Mode: "reply", Limit: len(members)}
 	h.store.Document(ctx, "policy", room, &p)
 	run := Run{ID: room, Status: "running", Policy: p, Updated: time.Now().UTC()}
 	if e := h.store.PutDocument(ctx, "run", room, run); e != nil {
 		delete(h.runs, room)
-		cancel()
+		cancel(nil)
 		return e
 	}
 	go func() {
-		defer cancel()
+		defer cancel(nil)
 		defer func() { h.runMu.Lock(); delete(h.runs, room); delete(h.activeTurns, room); h.runMu.Unlock() }()
 		h.audit("you", "CONVERSATION_STARTED", room, map[string]any{"mode": p.Mode, "limit": p.Limit})
 		finish := func(status string, e error) {
+			if status == "paused" && e == nil {
+				if why := interruption(context.Cause(ctx)); why != "" {
+					status, e = "interrupted", errors.New(why)
+					note := Message{ID: newID(), Room: room, Sender: "mace", Kind: "system", Text: why, At: time.Now().UTC(), Delivery: map[string]string{}}
+					h.store.PutDocument(context.Background(), "message:"+room, note.ID, note)
+				}
+			}
 			run.ActiveMember = ""
 			run.Status = status
+			run.Error = ""
 			if e != nil {
 				run.Error = e.Error()
 			}
@@ -242,7 +251,7 @@ func (h *APIHandler) beginConversation(room string, members []string, m Message)
 				}
 				reply, e = h.peerTurn(turnCtx, parts[0], parts[1], prompt)
 			} else if strings.HasPrefix(member, "session_") {
-				reply, e = h.turn(turnCtx, member, prompt)
+				reply, e = h.turn(turnCtx, member, prompt, "local")
 			} else {
 				e = h.supervisor.SendInput(member, prompt+"\n")
 				if e == nil {

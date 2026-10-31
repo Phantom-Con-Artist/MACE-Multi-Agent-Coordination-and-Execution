@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,23 +52,26 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 	r.Use(middleware.Recoverer)
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasSuffix(r.URL.Path, "/turn") {
-				next.ServeHTTP(w, r)
-				return
+			// Long-lived routes manage their own limits.
+			for _, suffix := range []string{"/turn", "/ws", "/stream", "/transfers/receive"} {
+				if strings.HasSuffix(r.URL.Path, suffix) {
+					next.ServeHTTP(w, r)
+					return
+				}
 			}
 			middleware.Timeout(60*time.Second)(next).ServeHTTP(w, r)
 		})
 	})
 	r.Use(corsMiddleware)
 
-	if cfg.AuthSecret != "" {
-		r.Use(authMiddleware(cfg.AuthSecret))
-	}
-
 	handler := NewAPIHandler(supervisor, store, cfg.NodeInfo)
 	handler.fileRoot = os.Getenv("MACE_FILE_ROOT")
 	if handler.fileRoot == "" {
 		handler.fileRoot = "/"
+	}
+	signIns := &devices{store: store, secret: cfg.AuthSecret}
+	if cfg.AuthSecret != "" {
+		r.Use(signIns.middleware)
 	}
 	r.Post("/api/session", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -80,22 +81,37 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		sum := sha256.Sum256([]byte(cfg.AuthSecret))
-		http.SetCookie(w, &http.Cookie{Name: "mace_session", Value: hex.EncodeToString(sum[:]), Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 86400})
+		if store == nil {
+			http.Error(w, "storage unavailable", 503)
+			return
+		}
+		// Opening the sign-in link again keeps this browser's existing device.
+		if id, ok, _ := signIns.check(r); ok && id != "" {
+			writeJSON(w, 200, map[string]bool{"connected": true})
+			return
+		}
+		if e := signIns.issue(w, r); e != nil {
+			http.Error(w, e.Error(), 500)
+			return
+		}
 		writeJSON(w, 200, map[string]bool{"connected": true})
 	})
 	r.Get("/api/session", func(w http.ResponseWriter, r *http.Request) {
-		sum := sha256.Sum256([]byte(cfg.AuthSecret))
-		cookie, err := r.Cookie("mace_session")
-		connected := cfg.AuthSecret == "" || (err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(hex.EncodeToString(sum[:]))) == 1)
-		writeJSON(w, 200, map[string]bool{"connected": connected})
+		_, ok, legacy := signIns.check(r)
+		if legacy && store != nil {
+			signIns.issue(w, r)
+		}
+		writeJSON(w, 200, map[string]bool{"connected": cfg.AuthSecret == "" || ok})
 	})
+	r.Post("/api/session/sign-out", signIns.signOut)
 
 	// Route bindings
 	r.Get("/health", handler.Health)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/catalog", handler.catalog)
+		r.Get("/devices", signIns.list)
+		r.Post("/devices/{id}/revoke", signIns.revoke)
 		r.Get("/sessions", handler.sessions)
 		r.Post("/sessions", handler.sessions)
 		r.Post("/sessions/{id}/turn", handler.remoteTurn)
@@ -113,6 +129,10 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/chats/{room}/policy", handler.policy)
 		r.Post("/chats/{room}/pause", handler.pause)
 		r.Post("/chats/{room}/start", handler.startDiscussion)
+		r.Post("/chats/{room}/continue", handler.continueConversation)
+		r.Post("/pause-all", handler.pauseAll)
+		r.Post("/presence", handler.presencePing)
+		r.Post("/presence/leave", handler.presenceLeave)
 		r.Get("/peers", handler.peers)
 		r.Post("/peers", handler.peers)
 		r.Get("/peers/{id}/sessions", handler.peerSessions)
@@ -174,6 +194,7 @@ func (s *Server) Router() *chi.Mux {
 // Start listens and serves incoming HTTP requests until context is cancelled.
 func (s *Server) Start(ctx context.Context) error {
 	var errChan = make(chan error, 1)
+	go s.handler.guardPresence(ctx)
 
 	go func() {
 		if s.listener != nil {
@@ -198,7 +219,7 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Stop(ctx context.Context) error {
 	s.handler.runMu.Lock()
 	for _, cancel := range s.handler.runs {
-		cancel()
+		cancel(errShutdown)
 	}
 	s.handler.runMu.Unlock()
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -219,28 +240,4 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-func authMiddleware(secret string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health and public endpoints exempt from auth
-			if r.URL.Path == "/health" || r.URL.Path == "/api/session" || !strings.HasPrefix(r.URL.Path, "/api/") {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			authHeader := r.Header.Get("Authorization")
-			expected := "Bearer " + secret
-			sum := sha256.Sum256([]byte(secret))
-			cookie, err := r.Cookie("mace_session")
-			cookieOK := err == nil && subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(hex.EncodeToString(sum[:]))) == 1
-			if subtle.ConstantTimeCompare([]byte(authHeader), []byte(expected)) != 1 && !cookieOK {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
 }

@@ -98,10 +98,11 @@ func (h *APIHandler) conversationPrompt(ctx context.Context, id, member string, 
 func (h *APIHandler) available(ctx context.Context, id string) bool {
 	var s Session
 	if strings.Contains(id, "::") {
+		// An agent the peer has never reported is not assumed to exist.
 		if h.store.Document(ctx, "remote-session", id, &s) == nil {
 			return s.Status != "removed" && s.Status != "stopped" && s.Status != "terminated"
 		}
-		return true
+		return false
 	}
 	if h.store.Document(ctx, "session", id, &s) == nil {
 		return s.Status == "ready"

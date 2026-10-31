@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -30,8 +31,11 @@ type managedAgent struct {
 	cmd          *exec.Cmd
 	stdin        io.WriteCloser
 	stdinMu      sync.Mutex
+	ctx          context.Context
 	cancel       context.CancelFunc
 	done         chan struct{}
+	lastOutput   atomic.Int64
+	killReason   string
 	seq          atomic.Uint64
 	bytesRead    atomic.Int64
 	bytesWritten atomic.Int64
@@ -56,6 +60,44 @@ type Supervisor struct {
 	agents      map[string]*managedAgent
 	subMu       sync.RWMutex
 	subscribers map[string][]chan *protocol.AgentEvent
+	tag         string
+}
+
+// SetProcessTag marks every child with MACE_PROCESS_TAG so ReapOrphans can find
+// processes left behind by a crashed daemon. Call it before launching anything.
+func (s *Supervisor) SetProcessTag(tag string) { s.tag = tag }
+
+// AcquireSlot waits for free capacity. Pass Reserved in the launch request to use it.
+func (s *Supervisor) AcquireSlot(ctx context.Context) error {
+	select {
+	case s.sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ReleaseSlot returns a slot that was acquired but never handed to StartAgent.
+func (s *Supervisor) ReleaseSlot() { <-s.sem }
+
+// childEnv removes Mace credentials and daemon settings from the inherited
+// environment. Agents, their tools, and desktop apps never need them.
+func childEnv(extra map[string]string, tag string) []string {
+	env := []string{}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "MACE_") {
+			env = append(env, kv)
+		}
+	}
+	for k, v := range extra {
+		if !strings.HasPrefix(k, "MACE_") {
+			env = append(env, k+"="+v)
+		}
+	}
+	if tag != "" {
+		env = append(env, "MACE_PROCESS_TAG="+tag)
+	}
+	return env
 }
 
 // NewSupervisor creates a new agent supervisor with a concurrency limit.
@@ -88,20 +130,28 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 	defer s.launchMu.Unlock()
 	if req.ID != "" {
 		if prior, _ := s.GetAgent(req.ID); prior != nil {
+			if req.Reserved {
+				<-s.sem
+			}
 			return nil, fmt.Errorf("agent ID already exists")
 		}
 	}
 	if err := req.Validate(); err != nil {
+		if req.Reserved {
+			<-s.sem
+		}
 		return nil, fmt.Errorf("invalid launch request: %w", err)
 	}
 
 	// Acquire concurrency slot
-	select {
-	case s.sem <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-		return nil, ErrPoolCapacityFull
+	if !req.Reserved {
+		select {
+		case s.sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			return nil, ErrPoolCapacityFull
+		}
 	}
 
 	agentID := req.ID
@@ -122,12 +172,7 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 	cmd := exec.CommandContext(agentCtx, req.Command, req.Args...)
 	cmd.Dir = workingDir
 
-	// Prepare environment
-	env := os.Environ()
-	for k, v := range req.Env {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
-	cmd.Env = env
+	cmd.Env = childEnv(req.Env, s.tag)
 	prepareCmdPlatform(cmd)
 	cmd.Cancel = func() error { return killProcessPlatform(cmd, syscall.SIGKILL) }
 
@@ -180,9 +225,11 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 		process: proc,
 		cmd:     cmd,
 		stdin:   stdinPipe,
+		ctx:     agentCtx,
 		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
+	managed.lastOutput.Store(time.Now().UnixNano())
 
 	s.mu.Lock()
 	s.agents[agentID] = managed
@@ -216,36 +263,90 @@ func (s *Supervisor) StartAgent(ctx context.Context, req protocol.AgentLaunchReq
 
 	// Spawn process watcher
 	go s.watchProcess(managed, &streamWg)
+	if req.IdleTimeoutSeconds > 0 {
+		go s.watchIdle(managed, time.Duration(req.IdleTimeoutSeconds)*time.Second)
+	}
 
 	return managed.snapshot(), nil
 }
 
+// maxEventChunk bounds one stored event. Longer lines are split into chunks
+// marked partial, so the pipe is always drained and the child never blocks.
+const maxEventChunk = 1 << 20
+
 func (s *Supervisor) pipeReader(r io.Reader, m *managedAgent, evtType protocol.EventType, wg *sync.WaitGroup) {
 	defer wg.Done()
-	scanner := bufio.NewScanner(r)
-	// Support lines up to 1MB
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	for scanner.Scan() {
-		text := scanner.Text()
-		m.bytesRead.Add(int64(len(text) + 1))
-
-		event := &protocol.AgentEvent{
-			EventID:   generateID("evt_"),
-			AgentID:   m.process.ID,
-			Type:      evtType,
-			Data:      text,
-			Timestamp: time.Now().UTC(),
-			Sequence:  m.seq.Add(1),
-		}
-
-		if s.store != nil {
-			if err := s.store.AppendEvent(context.Background(), event); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to append event to store: %v\n", err)
+	reader := bufio.NewReaderSize(r, 64*1024)
+	var line []byte
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		line = append(line, chunk...)
+		if err != nil {
+			if len(line) > 0 {
+				s.emitOutput(m, evtType, string(line), false)
 			}
+			if err != io.EOF {
+				s.emitOutput(m, protocol.EventStderr, "[mace] output reader error: "+err.Error(), false)
+				_, _ = io.Copy(io.Discard, r)
+			}
+			return
 		}
-		s.broadcastEvent(event)
+		if isPrefix && len(line) < maxEventChunk {
+			continue
+		}
+		s.emitOutput(m, evtType, string(line), isPrefix)
+		line = line[:0]
+	}
+}
+
+func (s *Supervisor) emitOutput(m *managedAgent, evtType protocol.EventType, text string, partial bool) {
+	m.lastOutput.Store(time.Now().UnixNano())
+	if !partial {
+		m.bytesRead.Add(int64(len(text) + 1))
+	} else {
+		m.bytesRead.Add(int64(len(text)))
+	}
+	event := &protocol.AgentEvent{
+		EventID:   generateID("evt_"),
+		AgentID:   m.process.ID,
+		Type:      evtType,
+		Data:      text,
+		Timestamp: time.Now().UTC(),
+		Sequence:  m.seq.Add(1),
+	}
+	if partial {
+		event.Metadata = map[string]string{"partial": "true"}
+	}
+	if s.store != nil {
+		if err := s.store.AppendEvent(context.Background(), event); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to append event to store: %v\n", err)
+		}
+	}
+	s.broadcastEvent(event)
+}
+
+// watchIdle stops a process that has produced no output for limit.
+func (s *Supervisor) watchIdle(m *managedAgent, limit time.Duration) {
+	interval := min(limit/4, 5*time.Second)
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.done:
+			return
+		case <-ticker.C:
+			if time.Since(time.Unix(0, m.lastOutput.Load())) < limit {
+				continue
+			}
+			m.mu.Lock()
+			m.killReason = fmt.Sprintf("no output for %s", limit.Round(time.Second))
+			m.mu.Unlock()
+			_ = s.StopAgent(m.process.ID, "SIGTERM", 3*time.Second)
+			return
+		}
 	}
 }
 
@@ -289,6 +390,12 @@ func (s *Supervisor) watchProcess(m *managedAgent, streamWg *sync.WaitGroup) {
 	m.stdinMu.Unlock()
 
 	m.mu.Lock()
+	if errMsg == "" && m.killReason != "" {
+		errMsg = m.killReason
+	}
+	if errMsg == "" && errors.Is(m.ctx.Err(), context.DeadlineExceeded) {
+		errMsg = "time limit reached"
+	}
 	m.process.Status = status
 	m.process.ExitCode = &exitCode
 	m.process.StoppedAt = &stoppedAt

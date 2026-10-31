@@ -13,6 +13,7 @@ func prepareCmdPlatform(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,
 	}
+	setDeathSignal(cmd.SysProcAttr)
 }
 
 // killProcessPlatform terminates the entire process group cleanly.

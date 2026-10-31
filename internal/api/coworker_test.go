@@ -116,12 +116,13 @@ func TestCoworkerContextAndNativeBootstrap(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "prompt.txt")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("MACE_TEST_PROMPT_LOG", capture)
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$MACE_TEST_PROMPT_LOG\"\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"coworker response\"}}'\n"
+	// Children never receive MACE_* variables, so the capture path uses another name.
+	t.Setenv("TEST_PROMPT_LOG", capture)
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$TEST_PROMPT_LOG\"\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"coworker response\"}}'\n"
 	if e := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0700); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.handler.turn(context.Background(), a.ID, prompt); e != nil {
+	if _, e := s.handler.turn(context.Background(), a.ID, prompt, "local"); e != nil {
 		t.Fatal(e)
 	}
 	sent, e := os.ReadFile(capture)

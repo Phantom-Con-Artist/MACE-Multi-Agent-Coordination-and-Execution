@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -9,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +43,18 @@ func main() {
 	tsEphemeralFlag := flag.Bool("ts-ephemeral", getEnvBool("MACE_TS_EPHEMERAL", true), "Register as ephemeral Tailscale node")
 
 	flag.Parse()
+	if path := os.Getenv("MACE_AUTH_SECRET_FILE"); *authSecretFlag == "" && path != "" {
+		b, e := os.ReadFile(path)
+		if e != nil {
+			log.Fatalf("[MACE] Cannot read access token file: %v", e)
+		}
+		*authSecretFlag = strings.TrimSpace(string(b))
+	}
+	// Children are launched with a filtered environment, but nothing else in this
+	// process should hand credentials on either.
+	for _, key := range []string{"MACE_AUTH_SECRET", "MACE_AUTH_SECRET_FILE", "MACE_TS_AUTHKEY"} {
+		os.Unsetenv(key)
+	}
 	if *authSecretFlag == "" {
 		token, e := bootstrap.Token(filepath.Join(filepath.Dir(*dbFlag), "access-token"))
 		if e != nil {
@@ -63,10 +78,22 @@ func main() {
 	}
 	defer store.Close()
 	log.Printf("[MACE] Database initialized at %s", *dbFlag)
+	if store.Recovered != "" {
+		log.Printf("[MACE] WARNING: %s", store.Recovered)
+		_ = store.AppendAudit(context.Background(), "storage", "DATABASE_RECOVERED", "", map[string]any{"details": store.Recovered})
+	}
 
 	// 2. Initialize Agent Supervisor
 	agentSupervisor := agent.NewSupervisor(store, *maxAgentsFlag)
 	defer agentSupervisor.Close()
+	installation := installationID(*dbFlag)
+	if n, e := agent.ReapOrphans(installation); e != nil {
+		log.Printf("[MACE] Could not check for leftover agent processes: %v", e)
+	} else if n > 0 {
+		log.Printf("[MACE] Stopped %d agent processes left behind by an earlier daemon", n)
+		_ = store.AppendAudit(context.Background(), "supervisor", "ORPHANS_STOPPED", "", map[string]any{"count": n})
+	}
+	agentSupervisor.SetProcessTag(agent.ProcessTag(installation, os.Getpid()))
 	log.Printf("[MACE] Supervisor ready (Max concurrent agents: %d)", *maxAgentsFlag)
 
 	// 3. Initialize Networking (Tailscale or local TCP)
@@ -115,6 +142,8 @@ func main() {
 		NodeInfo:   nodeInfo,
 		Listener:   listener,
 	}, agentSupervisor, store)
+
+	go maintain(ctx, store, time.Duration(getEnvInt("MACE_EVENT_RETENTION_DAYS", 14))*24*time.Hour)
 
 	// 5. Manage Services with Supervisor Group
 	group := concurrency.NewSupervisorGroup()
@@ -169,4 +198,43 @@ func getEnvBool(key string, fallback bool) bool {
 		return val == "true" || val == "1" || val == "yes"
 	}
 	return fallback
+}
+
+// installationID names one Mace state directory, so orphan cleanup never touches
+// processes that belong to another Mace instance on the same machine.
+func installationID(dbPath string) string {
+	abs, err := filepath.Abs(dbPath)
+	if err != nil {
+		abs = dbPath
+	}
+	sum := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(sum[:8])
+}
+
+// maintain prunes old native output hourly and keeps three daily backups.
+func maintain(ctx context.Context, store *storage.Store, retention time.Duration) {
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		if _, at := store.LatestBackup(); time.Since(at) > 24*time.Hour {
+			if path, e := store.Backup("daily"); e != nil {
+				log.Printf("[MACE] Daily backup failed: %v", e)
+			} else {
+				log.Printf("[MACE] Daily backup written to %s", path)
+				store.PruneBackups(3)
+			}
+		}
+		if retention > 0 {
+			if n, e := store.PruneEvents(ctx, time.Now().Add(-retention)); e != nil {
+				log.Printf("[MACE] Pruning native output failed: %v", e)
+			} else if n > 0 {
+				log.Printf("[MACE] Pruned %d native output lines older than %s", n, retention)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

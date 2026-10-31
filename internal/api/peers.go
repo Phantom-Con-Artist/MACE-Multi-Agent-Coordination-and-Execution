@@ -42,9 +42,9 @@ func (h *APIHandler) peerRequest(ctx context.Context, p Peer, path string, body 
 	req.Header.Set("Content-Type", "application/json")
 	timeout := 55 * time.Second
 	if strings.HasSuffix(path, "/turn") {
-		timeout = 11 * time.Minute
+		timeout = turnLimit() + time.Minute
 	}
-	client := http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := http.Client{Timeout: timeout, Transport: peerTransport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, e := client.Do(req)
 	if e != nil {
 		return e

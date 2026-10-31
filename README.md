@@ -21,7 +21,15 @@ Mace discovers Codex, Claude Code, Antigravity (agy), and Muse on the host PATH.
 
 Create a group with local or connected-host agents. Choose Reply limit, Goal oriented, or Continuous mode. The reply limit counts total agent replies, not rounds. Goal mode stops when an agent reports completion with evidence, or its reply budget is reached. Continuous mode runs until paused or a reply fails. A completion report is an agent claim for the owner to inspect.
 
-Conversation controls offer stop, terminate, resume, and remove. Group controls also add or remove members and stop or terminate individual agents. Removal preserves chat history. Runs are paused after a host restart, so work never silently resumes.
+Conversation controls offer stop, terminate, resume, and remove. Group controls also add or remove members and stop or terminate individual agents. Removal preserves chat history.
+
+## When the connection drops
+
+Mace stops agent work when you are gone. Every signed-in browser checks in every five seconds. If no device has checked in for 10 seconds plus a 15 second grace period, the host stops every agent process it started and marks those conversations Interrupted. When you return, a note says when work stopped, and Continue resumes each conversation. Phone browsers pause in the background, so locking your phone for longer than the grace period also stops work. Set MACE_PRESENCE_GRACE_SECONDS to change the grace period, 0 to stop as soon as possible, or off to keep agents working while you are away. Work started only through the API, with no browser signed in, is not affected.
+
+Pause everything, in the workspace banner or with `mace pause-all`, stops all agent work on this host and on connected hosts. Desktop apps are never stopped. A host restart also marks running work Interrupted, so nothing resumes on its own.
+
+Each browser keeps its own sign-in. Settings lists signed-in devices and lets you remove one. Changing the access token signs out every device.
 
 Host provides file browsing, text/media inspection, desktop app discovery and launch, and agent controls. Activity shows conversation state, audit events, native stdout/stderr, and file transactions.
 
@@ -37,6 +45,7 @@ mace logs --lines 50
 mace logs --follow
 mace restart
 mace version
+mace pause-all          # stop all agent work here and on connected hosts
 mace stop
 mace kill
 maced                  # foreground daemon

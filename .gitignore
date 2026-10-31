@@ -88,3 +88,4 @@ desktop.ini
 web/dist/
 bin/
 .artifacts/
+.playwright-mcp/

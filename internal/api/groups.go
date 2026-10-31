@@ -24,7 +24,7 @@ func (h *APIHandler) removeGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	h.runMu.Lock()
 	if cancel := h.runs[id]; cancel != nil {
-		cancel()
+		cancel(nil)
 	}
 	h.runMu.Unlock()
 	h.audit("you", "GROUP_REMOVED", id, map[string]any{"history_retained": true})
@@ -107,7 +107,7 @@ func (h *APIHandler) stopMemberRuns(id string, remove bool) {
 	defer h.roomMu.Unlock()
 	h.runMu.Lock()
 	if cancel := h.runs[id]; cancel != nil {
-		cancel()
+		cancel(nil)
 	}
 	h.runMu.Unlock()
 	raw, _ := h.store.Documents(context.Background(), "room")

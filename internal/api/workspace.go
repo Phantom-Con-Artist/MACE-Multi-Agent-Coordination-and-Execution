@@ -120,7 +120,22 @@ func (h *APIHandler) activity(w http.ResponseWriter, r *http.Request) {
 
 // turn runs one native CLI invocation. Conversation context lives in Mace, so each
 // invocation receives the transcript and exits; no TUI or stdin prompt knowledge is needed.
-func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error) {
+//
+// origin is "local" for conversations run by this host and "peer" for turns a
+// connected host requested. The presence guard only stops local work; peer turns
+// stop when the requesting host cancels or its connection drops.
+func (h *APIHandler) turn(ctx context.Context, id, prompt, origin string) (string, error) {
+	// Wait for capacity before taking the lifecycle lock, so stop and terminate
+	// stay responsive while many agents are queued.
+	if e := h.supervisor.AcquireSlot(ctx); e != nil {
+		return "", e
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			h.supervisor.ReleaseSlot()
+		}
+	}()
 	h.lifecycleMu.Lock()
 	locked := true
 	defer func() {
@@ -153,7 +168,8 @@ func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error
 	case "codex":
 		args = []string{"exec", "--json", "--skip-git-repo-check", prompt}
 	case "claude":
-		args = []string{"-p", "--output-format", "json", prompt}
+		// stream-json reports progress while working, which the idle limit relies on.
+		args = []string{"-p", "--output-format", "stream-json", "--verbose", prompt}
 	case "agy":
 		args = []string{"--print", prompt, "--output-format", "text"}
 	case "muse":
@@ -175,7 +191,12 @@ func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error
 			h.store.PutDocument(context.Background(), "session", s.ID, current)
 		}
 	}()
-	proc, e := h.supervisor.StartAgent(ctx, protocol.AgentLaunchRequest{Name: s.Name + " reply", Command: command, Args: args, WorkingDir: s.Directory, TimeoutSeconds: 600, Labels: map[string]string{"session": id}})
+	launch := protocol.AgentLaunchRequest{Name: s.Name + " reply", Command: command, Args: args, WorkingDir: s.Directory, TimeoutSeconds: int(turnLimit().Seconds()), Labels: map[string]string{"session": id, "origin": origin}, Reserved: true}
+	if s.Provider == "claude" || s.Provider == "codex" {
+		launch.IdleTimeoutSeconds = int(idleLimit().Seconds())
+	}
+	reserved = false
+	proc, e := h.supervisor.StartAgent(ctx, launch)
 	if e != nil {
 		return "", e
 	}
@@ -201,29 +222,29 @@ func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error
 			if !p.Status.IsTerminal() {
 				continue
 			}
-			events, e := h.store.GetAgentEvents(ctx, proc.ID, 0, 10000)
+			stdout, stderrLines, e := h.processOutput(ctx, proc.ID)
 			if e != nil {
 				return "", e
 			}
 			var result, stderr strings.Builder
-			for _, ev := range events {
-				if ev.Type == protocol.EventStderr {
-					stderr.WriteString(ev.Data)
-					stderr.WriteByte('\n')
-				}
-				if ev.Type != protocol.EventStdout {
-					continue
-				}
+			for _, line := range stderrLines {
+				stderr.WriteString(line)
+				stderr.WriteByte('\n')
+			}
+			for _, line := range stdout {
 				if s.Provider == "diagnostic" || s.Provider == "agy" || s.Provider == "muse" {
-					result.WriteString(ev.Data)
+					result.WriteString(line)
 					result.WriteByte('\n')
 					continue
 				}
 				var obj map[string]any
-				if json.Unmarshal([]byte(ev.Data), &obj) != nil {
+				if json.Unmarshal([]byte(line), &obj) != nil {
 					continue
 				}
 				if s.Provider == "claude" {
+					if obj["type"] != "result" {
+						continue
+					}
 					if failed, ok := obj["is_error"].(bool); ok && failed {
 						return "", fmt.Errorf("Claude Code: %v", obj["result"])
 					}
@@ -240,6 +261,9 @@ func (h *APIHandler) turn(ctx context.Context, id, prompt string) (string, error
 				}
 			}
 			if p.ExitCode != nil && *p.ExitCode != 0 {
+				if p.Error != "" {
+					return "", fmt.Errorf("%s was stopped: %s", s.Name, p.Error)
+				}
 				return "", fmt.Errorf("%s exited (%d): %s", s.Name, *p.ExitCode, truncate(stderr.String(), 3000))
 			}
 			if strings.TrimSpace(result.String()) == "" {
@@ -264,9 +288,9 @@ func (h *APIHandler) remoteTurn(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "prompt required", 400)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), turnLimit())
 	defer cancel()
-	reply, e := h.turn(ctx, routeParam(r, "id"), req.Prompt)
+	reply, e := h.turn(ctx, routeParam(r, "id"), req.Prompt, "peer")
 	if e != nil {
 		http.Error(w, e.Error(), 502)
 		return

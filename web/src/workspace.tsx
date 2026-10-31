@@ -41,6 +41,7 @@ import {
   WifiOff,
   ArrowDown,
   Pencil,
+  ShieldCheck,
 } from "lucide-react";
 type Agent = {
   id: string;
@@ -88,6 +89,28 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   if (!r.ok) throw Error((await r.text()).trim());
   return r.json();
 }
+type Device = { id: string; name: string; last_seen: string; current?: boolean };
+// randomUUID needs a secure context, and LAN sign-in links are plain HTTP.
+const randomID = () =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+const stored = (key: string) => {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+};
+const store = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* Private windows can refuse storage; the page still works without it. */
+  }
+};
+const deviceID = stored("mace-device") || randomID();
+store("mace-device", deviceID);
 const full = (p: string) => (p === "." ? "/" : "/" + p.replace(/^\/+/, ""));
 const clock = (s: string) =>
   new Date(s).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -101,6 +124,7 @@ const statusLabel = (status: string) =>
       terminated: "Terminated",
       running: "Working",
       paused: "Paused",
+      interrupted: "Interrupted",
       failed: "Needs attention",
       completed: "Done",
       limit_reached: "Reply limit reached",
@@ -147,7 +171,11 @@ export default function Workspace() {
     [checking, setChecking] = useState(true),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [awayAt, setAwayAt] = useState(""),
+    [devices, setDevices] = useState<Device[]>([]);
+  // One ID per unsent draft, so a retry after a dropped response is not sent twice.
+  const pendingSends = useRef<Record<string, string>>({});
   const [agents, setAgents] = useState<Agent[]>([]),
     [processes, setProcesses] = useState<Agent[]>([]),
     [rooms, setRooms] = useState<Room[]>([]),
@@ -291,6 +319,41 @@ export default function Workspace() {
       clearInterval(id);
     };
   }, []);
+  // Presence: the host stops agent work when every signed-in device goes quiet.
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    async function ping() {
+      try {
+        const r = await api<{ stopped_at?: string }>("/v1/presence", {
+          device: deviceID,
+        });
+        if (alive && r.stopped_at && r.stopped_at !== stored("mace-away-seen"))
+          setAwayAt(r.stopped_at);
+      } catch {
+        /* The connection banner already reports an unreachable host. */
+      }
+    }
+    void ping();
+    const id = setInterval(() => void ping(), 5000);
+    const leave = () =>
+      navigator.sendBeacon(
+        "/api/v1/presence/leave",
+        JSON.stringify({ device: deviceID }),
+      );
+    addEventListener("pagehide", leave);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      removeEventListener("pagehide", leave);
+    };
+  }, [connected]);
+  useEffect(() => {
+    if (connected && page === "settings")
+      void api<Device[]>("/v1/devices")
+        .then(setDevices)
+        .catch(() => setDevices([]));
+  }, [connected, page]);
   useEffect(() => {
     const viewport = window.visualViewport;
     const resize = () => {
@@ -665,6 +728,45 @@ export default function Workspace() {
             <button onClick={() => void refresh()}>Retry</button>
           </div>
         )}
+        {connected && awayAt && (
+          <div className="connection-banner away-banner" role="status">
+            <ShieldCheck size={18} />
+            <span>
+              While you were away, agents were stopped at {clock(awayAt)}.
+              Open a conversation and choose Continue to resume.
+            </span>
+            <button
+              onClick={() => {
+                store("mace-away-seen", awayAt);
+                setAwayAt("");
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {connected && runs.some((r) => r.status === "running") && (
+          <div className="connection-banner work-banner" role="status">
+            <Activity size={18} />
+            <span>
+              {runs.filter((r) => r.status === "running").length === 1
+                ? "1 conversation is working."
+                : `${runs.filter((r) => r.status === "running").length} conversations are working.`}
+            </span>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void action(async () => {
+                  await api("/v1/pause-all", {});
+                  await refresh();
+                  setNotice("Everything is paused. Continue each conversation when ready.");
+                })
+              }
+            >
+              Pause everything
+            </button>
+          </div>
+        )}
         {!connected ? (
           <div className="connect-screen">
             <img src="/mace-mark.svg" width="64" height="64" alt="Mace" />
@@ -949,7 +1051,32 @@ export default function Workspace() {
                         Agents are working. You can pause this conversation.
                       </div>
                     )}
-                    {run?.error && (
+                    {run?.status === "interrupted" ? (
+                      <div className="run-interrupted" role="status">
+                        {/* The reason is already in the conversation as a note. */}
+                        <p>Work stopped here. Continue to pick up where it left off.</p>
+                        <button
+                          className="primary"
+                          disabled={busy || !online}
+                          onClick={() =>
+                            void action(async () => {
+                              await api(
+                                "/v1/chats/" +
+                                  encodeURIComponent(selected) +
+                                  "/continue",
+                                {},
+                              );
+                              if (awayAt) store("mace-away-seen", awayAt);
+                              setAwayAt("");
+                              await refresh();
+                            })
+                          }
+                        >
+                          <Play size={16} />
+                          Continue
+                        </button>
+                      </div>
+                    ) : run?.error && (
                       <div className="run-error" role="alert">
                         {run.error}
                         <button onClick={() => nav("activity")}>
@@ -957,7 +1084,7 @@ export default function Workspace() {
                         </button>
                       </div>
                     )}
-                    {run && !running && (
+                    {run && !running && run.status !== "interrupted" && (
                       <div className="work-state">
                         {statusLabel(run.status)} · {run.replies}{" "}
                         {run.replies === 1 ? "reply" : "replies"}
@@ -1000,12 +1127,19 @@ export default function Workspace() {
                       )
                         return;
                       void action(async () => {
+                        const conversation = selected;
+                        pendingSends.current[conversation] ||= randomID();
                         const m = await api<Msg>(
                           "/v1/chats/" +
-                            encodeURIComponent(selected) +
+                            encodeURIComponent(conversation) +
                             "/messages",
-                          { text: drafts[selected] || "", file: attachment },
+                          {
+                            text: drafts[conversation] || "",
+                            file: attachment,
+                            client_id: pendingSends.current[conversation],
+                          },
                         );
+                        delete pendingSends.current[conversation];
                         if (
                           Object.values(m.delivery || {}).some(
                             (value) => value !== "delivered",
@@ -1491,6 +1625,51 @@ export default function Workspace() {
                   <button className="secondary" onClick={() => nav("hosts")}>
                     Manage hosts
                   </button>
+                </section>
+                <section className="setting devices">
+                  <div>
+                    <h2>Signed-in devices</h2>
+                    <p>
+                      Each browser keeps its own sign-in. Remove one you no
+                      longer use.
+                    </p>
+                  </div>
+                  <ul>
+                    {devices.map((d) => (
+                      <li key={d.id}>
+                        <span>
+                          {d.name}
+                          <small>
+                            {d.current ? "This device" : "Last seen " + clock(d.last_seen)}
+                          </small>
+                        </span>
+                        <button
+                          className="secondary"
+                          disabled={busy}
+                          onClick={() =>
+                            void action(async () => {
+                              if (d.current) {
+                                await api("/session/sign-out", {});
+                                setConnected(false);
+                                return;
+                              }
+                              await api("/v1/devices/" + d.id + "/revoke", {});
+                              setDevices((v) => v.filter((x) => x.id !== d.id));
+                              setNotice(d.name + " was signed out.");
+                            })
+                          }
+                        >
+                          {d.current ? "Sign out" : "Remove"}
+                        </button>
+                      </li>
+                    ))}
+                    {!devices.length && (
+                      <li className="muted">
+                        Signed in with the access token. Browser sign-ins appear
+                        here.
+                      </li>
+                    )}
+                  </ul>
                 </section>
                 <button
                   className="control-row"

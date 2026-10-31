@@ -15,7 +15,10 @@ import (
 
 // Store provides persistence for MACE agents, execution events, and audit logs.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
+	// Recovered describes an automatic restore after corruption, if one happened.
+	Recovered string
 }
 
 // Open initializes an SQLite database with WAL mode and foreign key constraints enabled.
@@ -38,7 +41,22 @@ func Open(dbPath string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	store := &Store{db: db}
+	store := &Store{db: db, path: dbPath}
+	if dbPath != ":memory:" {
+		if ok, detail := store.healthy(); !ok {
+			db.Close()
+			recovered, err := recoverCorrupt(dbPath, detail)
+			if err != nil {
+				return nil, err
+			}
+			store, err = Open(dbPath)
+			if err != nil {
+				return nil, err
+			}
+			store.Recovered = recovered
+			return store, nil
+		}
+	}
 	if err := store.migrate(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run database migrations: %w", err)
@@ -53,7 +71,47 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
-	schema := `
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version >= len(migrations) {
+		return nil
+	}
+	if version > 0 && s.path != ":memory:" {
+		if _, err := s.Backup(fmt.Sprintf("pre-v%d", len(migrations))); err != nil {
+			return fmt.Errorf("backup before migration failed: %w", err)
+		}
+	}
+	for i := version; i < len(migrations); i++ {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrations are applied in order and never edited once released. Version 1 is
+// the original schema, written with IF NOT EXISTS so older unversioned databases
+// pass through it unchanged.
+var migrations = []string{
+	baseSchema,
+	`CREATE INDEX IF NOT EXISTS idx_agent_events_timestamp ON agent_events(timestamp);`,
+}
+
+const baseSchema = `
 	CREATE TABLE IF NOT EXISTS documents (kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind,id));
 	CREATE TABLE IF NOT EXISTS agents (
 		id TEXT PRIMARY KEY,
@@ -97,9 +155,6 @@ func (s *Store) migrate() error {
 		timestamp DATETIME NOT NULL
 	);
 	`
-	_, err := s.db.Exec(schema)
-	return err
-}
 
 // SaveAgent inserts or replaces an agent record.
 func (s *Store) SaveAgent(ctx context.Context, a *protocol.AgentProcess) error {

@@ -25,6 +25,8 @@ type Message struct {
 	Sender   string            `json:"sender"`
 	Text     string            `json:"text"`
 	File     string            `json:"file,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	ClientID string            `json:"client_id,omitempty"`
 	At       time.Time         `json:"at"`
 	Delivery map[string]string `json:"delivery"`
 }
@@ -130,8 +132,29 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 	} else {
 		m.Sender = "you"
 	}
+	// A phone on a weak network may resend; the same client_id returns the
+	// original message instead of starting the work twice.
+	if len(m.ClientID) > 100 {
+		http.Error(w, "client_id too long", 400)
+		return
+	}
+	if m.ClientID != "" {
+		h.sendMu.Lock()
+		defer h.sendMu.Unlock()
+		var prior struct {
+			Message string `json:"message"`
+		}
+		if h.store.Document(r.Context(), "client-message:"+id, m.ClientID, &prior) == nil {
+			var existing Message
+			if h.store.Document(r.Context(), "message:"+id, prior.Message, &existing) == nil {
+				writeJSON(w, 200, existing)
+				return
+			}
+		}
+	}
 	m.ID = newID()
 	m.Room = id
+	m.Kind = ""
 	m.At = time.Now().UTC()
 	m.Delivery = map[string]string{}
 	if m.File != "" {
@@ -151,6 +174,9 @@ func (h *APIHandler) messages(w http.ResponseWriter, r *http.Request) {
 	if e := h.store.PutDocument(r.Context(), "message:"+id, m.ID, m); e != nil {
 		http.Error(w, e.Error(), 500)
 		return
+	}
+	if m.ClientID != "" {
+		h.store.PutDocument(r.Context(), "client-message:"+id, m.ClientID, map[string]string{"message": m.ID})
 	}
 	if h.managed(members) {
 		if e := h.beginConversation(id, members, m); e != nil {

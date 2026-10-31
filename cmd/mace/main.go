@@ -258,8 +258,18 @@ func (c settings) start() error {
 	defer log.Close()
 	ready := filepath.Join(c.State, "ready.json")
 	os.Remove(ready)
+	// The token reaches the daemon through a private file, never the environment:
+	// /proc/<pid>/environ stays readable to every process of the same user.
+	secretFile := filepath.Join(c.State, "active-token")
+	if e := os.MkdirAll(c.State, 0700); e != nil {
+		return e
+	}
+	if e := os.WriteFile(secretFile, []byte(token), 0600); e != nil {
+		return e
+	}
+	secretEnv := "MACE_AUTH_SECRET_FILE=" + secretFile
 	cmd := exec.Command(c.Daemon, c.Args...)
-	cmd.Env = append(os.Environ(), "MACE_AUTH_SECRET="+token, "MACE_WEB_DIR="+c.Web, "MACE_READY_FILE="+ready)
+	cmd.Env = append(withoutEnv(os.Environ(), "MACE_AUTH_SECRET"), secretEnv, "MACE_WEB_DIR="+c.Web, "MACE_READY_FILE="+ready)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout = log
 	cmd.Stderr = log
@@ -369,6 +379,9 @@ func killDescendants(pid int) {
 	}
 }
 func (c settings) request(path string, out any) error {
+	return c.call("GET", path, 3*time.Second, out)
+}
+func (c settings) call(method, path string, timeout time.Duration, out any) error {
 	r := c.info()
 	if !c.owns(c.pid()) {
 		return errors.New("server is stopped; run mace start")
@@ -377,12 +390,12 @@ func (c settings) request(path string, out any) error {
 	if url == "" {
 		url = c.localURL()
 	}
-	req, e := http.NewRequest("GET", url+"/api/v1"+path, nil)
+	req, e := http.NewRequest(method, url+"/api/v1"+path, nil)
 	if e != nil {
 		return e
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token())
-	client := http.Client{Timeout: 3 * time.Second}
+	client := http.Client{Timeout: timeout}
 	res, e := client.Do(req)
 	if e != nil {
 		return e
@@ -511,7 +524,7 @@ func (c settings) doctor() error {
 }
 func help() {
 	bootstrap.Brand()
-	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
+	fmt.Print("Usage: mace <command> [options]\n\n  start [--port 8080] [--host 0.0.0.0]  Start and print sign-in links\n  status [--port 8080]                  Check PID, address, and HTTP health\n  ports                                 List local Mace listeners\n  info                                  Print current links and token\n  token                                 Print the current access token\n  agents                                List conversational agents\n  ps                                    List native processes\n  logs [--lines 50] [--follow]            Inspect host logs\n  doctor [--port 8080]                   Check port, paths, and CLI discovery\n  restart [daemon options]              Restart with the saved settings\n  stop [--port 8080]                    Stop one Mace server gracefully\n  pause-all                             Stop all agent work here and on connected hosts\n  kill [--port 8080]                    Force stop Mace and its descendants\n  version                               Print name, abbreviation, and version\n  maced [options]                       Run the foreground daemon\n  help                                  Show these commands\n\nStart examples: mace start | mace start --port 8081 | mace start --port 0\nFor all daemon options: mace maced --help\n")
 }
 func run(args []string) error {
 	command := "help"
@@ -609,6 +622,21 @@ func run(args []string) error {
 			fmt.Println("No agents yet. Open Chats and choose +.")
 		}
 		return nil
+	case "pause-all":
+		var out struct {
+			Runs      int               `json:"runs"`
+			Processes int               `json:"processes"`
+			Peers     map[string]string `json:"peers"`
+		}
+		if e := c.call("POST", "/pause-all", 30*time.Second, &out); e != nil {
+			return e
+		}
+		fmt.Printf("Paused %d conversations and stopped %d agent processes on this host.\n", out.Runs, out.Processes)
+		for peer, result := range out.Peers {
+			fmt.Printf("  %s: %s\n", peer, result)
+		}
+		fmt.Println("Open a conversation and choose Continue to resume.")
+		return nil
 	case "maced":
 		cmd := exec.Command(c.Daemon, args...)
 		cmd.Stdin = os.Stdin
@@ -618,4 +646,20 @@ func run(args []string) error {
 	default:
 		return fmt.Errorf("unknown command %q; run mace help", command)
 	}
+}
+
+func withoutEnv(env []string, keys ...string) []string {
+	out := env[:0:0]
+	for _, kv := range env {
+		keep := true
+		for _, k := range keys {
+			if strings.HasPrefix(kv, k+"=") {
+				keep = false
+			}
+		}
+		if keep {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

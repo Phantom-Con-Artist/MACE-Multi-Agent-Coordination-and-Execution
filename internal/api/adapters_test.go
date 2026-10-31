@@ -10,7 +10,7 @@ import (
 func TestNativeAgentAdapters(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
-	fixtures := map[string]string{"codex": `{"type":"item.completed","item":{"type":"agent_message","text":"codex response"}}`, "claude": `{"result":"claude response","is_error":false}`, "agy": "agy response", "muse": "muse response"}
+	fixtures := map[string]string{"codex": `{"type":"item.completed","item":{"type":"agent_message","text":"codex response"}}`, "claude": `{"type":"system","subtype":"init"}' '{"type":"result","subtype":"success","result":"claude response","is_error":false}`, "agy": "agy response", "muse": "muse response"}
 	for provider, output := range fixtures {
 		if e := os.WriteFile(filepath.Join(root, provider), []byte("#!/bin/sh\nprintf '%s\\n' '"+output+"'\n"), 0700); e != nil {
 			t.Fatal(e)
@@ -24,7 +24,7 @@ func TestNativeAgentAdapters(t *testing.T) {
 		if call(t, s, "POST", "/api/v1/sessions", map[string]string{"provider": provider}, &a) != 201 {
 			t.Fatal(provider)
 		}
-		reply, e := s.handler.turn(context.Background(), a.ID, "test prompt")
+		reply, e := s.handler.turn(context.Background(), a.ID, "test prompt", "local")
 		if e != nil || reply != provider+" response" {
 			t.Fatal(provider, reply, e)
 		}

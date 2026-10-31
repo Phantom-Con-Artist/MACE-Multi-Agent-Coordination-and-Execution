@@ -38,7 +38,13 @@ type AgentLaunchRequest struct {
 	WorkingDir     string            `json:"working_dir,omitempty"`
 	Interactive    bool              `json:"interactive,omitempty"`
 	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	// IdleTimeoutSeconds stops a process that produces no output for this long.
+	// Only use it for adapters that stream progress while working.
+	IdleTimeoutSeconds int               `json:"idle_timeout_seconds,omitempty"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	// Reserved means the caller already holds a slot from AcquireSlot. The
+	// supervisor takes ownership of that slot whether or not the launch succeeds.
+	Reserved bool `json:"-"`
 }
 
 // Validate checks whether the launch request has valid parameters.
@@ -49,7 +55,7 @@ func (r *AgentLaunchRequest) Validate() error {
 	if strings.TrimSpace(r.Name) == "" {
 		r.Name = r.Command
 	}
-	if r.TimeoutSeconds < 0 {
+	if r.TimeoutSeconds < 0 || r.IdleTimeoutSeconds < 0 {
 		return errors.New("timeout_seconds cannot be negative")
 	}
 	return nil
@@ -57,20 +63,20 @@ func (r *AgentLaunchRequest) Validate() error {
 
 // AgentProcess represents the runtime metadata of a managed agent process.
 type AgentProcess struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	PID            int               `json:"pid"`
-	Status         AgentStatus       `json:"status"`
-	Command        string            `json:"command"`
-	Args           []string          `json:"args,omitempty"`
-	WorkingDir     string            `json:"working_dir"`
-	ExitCode       *int              `json:"exit_code,omitempty"`
-	Error          string            `json:"error,omitempty"`
-	StartedAt      time.Time         `json:"started_at"`
-	StoppedAt      *time.Time        `json:"stopped_at,omitempty"`
-	BytesRead      int64             `json:"bytes_read"`
-	BytesWritten   int64             `json:"bytes_written"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	PID          int               `json:"pid"`
+	Status       AgentStatus       `json:"status"`
+	Command      string            `json:"command"`
+	Args         []string          `json:"args,omitempty"`
+	WorkingDir   string            `json:"working_dir"`
+	ExitCode     *int              `json:"exit_code,omitempty"`
+	Error        string            `json:"error,omitempty"`
+	StartedAt    time.Time         `json:"started_at"`
+	StoppedAt    *time.Time        `json:"stopped_at,omitempty"`
+	BytesRead    int64             `json:"bytes_read"`
+	BytesWritten int64             `json:"bytes_written"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 // Clone returns a deep copy of the AgentProcess metadata.
