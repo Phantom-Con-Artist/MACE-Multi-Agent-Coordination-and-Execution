@@ -75,3 +75,11 @@ func TestLongRepliesGetANudge(t *testing.T) {
 		t.Fatal("the reminder is only for the agent that wrote long")
 	}
 }
+
+func TestHandlesQuotedInCodeAreNotMentions(t *testing.T) {
+	handles := map[string]string{"a": "agy", "m": "muse"}
+	got, _ := parseMentions("verified group targeting (`@agy`) and\n```\n@muse here\n```\nthanks @muse", handles)
+	if len(got) != 1 || got[0] != "m" {
+		t.Fatalf("only the plain @muse is a mention, got %v", got)
+	}
+}

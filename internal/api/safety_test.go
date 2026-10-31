@@ -69,7 +69,7 @@ func TestOwnerDisconnectStopsAgentsAndContinueResumes(t *testing.T) {
 	if s.handler.ownerAway(time.Now().Add(5 * time.Second)) {
 		t.Fatal("guard fired while the device was still present")
 	}
-	if !s.handler.ownerAway(time.Now().Add(presenceTimeout + 16*time.Second)) {
+	if !s.handler.ownerAway(time.Now().Add(presenceTimeout + 10*time.Minute + time.Second)) {
 		t.Fatal("guard should fire after timeout plus grace")
 	}
 	s.handler.stopWork(errOwnerAway, true)
@@ -223,5 +223,24 @@ func TestRestartMarksRunningWorkInterrupted(t *testing.T) {
 	h.store.Document(context.Background(), "run", "room1", &run)
 	if run.Status != "interrupted" || run.ActiveMember != "" {
 		t.Fatalf("expected interrupted after restart, got %+v", run)
+	}
+}
+
+func TestOwnerCanKeepAgentsWorkingWhileAway(t *testing.T) {
+	t.Setenv("MACE_PRESENCE_GRACE_SECONDS", "")
+	s, sup, store := setupTestServer(t, "secret")
+	defer store.Close()
+	defer sup.Close()
+	call(t, s, "POST", "/api/v1/presence", map[string]string{"device": "phone"}, nil)
+	if s.handler.ownerAway(time.Now().Add(5 * time.Minute)) {
+		t.Fatal("a locked phone should get ten minutes before agents stop")
+	}
+	var out map[string]any
+	call(t, s, "POST", "/api/v1/settings/presence", map[string]bool{"keep_working": true}, &out)
+	if out["keep_working"] != true {
+		t.Fatalf("setting not saved: %v", out)
+	}
+	if s.handler.ownerAway(time.Now().Add(time.Hour)) {
+		t.Fatal("with keep working on, the guard must not stop agents")
 	}
 }

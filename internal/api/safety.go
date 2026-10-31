@@ -188,7 +188,37 @@ func presenceGrace() (time.Duration, bool) {
 	if n, e := strconv.Atoi(v); e == nil && n >= 0 {
 		return time.Duration(n) * time.Second, true
 	}
-	return 15 * time.Second, true
+	// A phone browser goes quiet as soon as the screen locks, so the default
+	// gives the owner ten minutes before agents stop.
+	return 10 * time.Minute, true
+}
+
+// presenceSetting is the owner's choice about working while away.
+type presenceSetting struct {
+	KeepWorking bool `json:"keep_working"`
+}
+
+func (h *APIHandler) keepWorking() bool {
+	var s presenceSetting
+	return h.store != nil && h.store.Document(context.Background(), "setting", "presence", &s) == nil && s.KeepWorking
+}
+
+// presenceSettings serves GET and POST /api/v1/settings/presence.
+func (h *APIHandler) presenceSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var s presenceSetting
+		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&s) != nil {
+			http.Error(w, "Send keep_working as true or false.", 400)
+			return
+		}
+		if err := h.store.PutDocument(r.Context(), "setting", "presence", s); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		h.audit("you", "PRESENCE_SETTING_CHANGED", "", map[string]any{"keep_working": s.KeepWorking})
+	}
+	grace, enabled := presenceGrace()
+	writeJSON(w, 200, map[string]any{"keep_working": h.keepWorking(), "guard": enabled, "grace_seconds": int(grace.Seconds())})
 }
 
 func (h *APIHandler) presencePing(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +267,7 @@ func (h *APIHandler) ownerAway(now time.Time) bool {
 	grace, enabled := presenceGrace()
 	h.presence.mu.Lock()
 	defer h.presence.mu.Unlock()
-	if !enabled || !h.presence.armed {
+	if !enabled || !h.presence.armed || h.keepWorking() {
 		return false
 	}
 	for device, seen := range h.presence.lastSeen {

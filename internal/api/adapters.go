@@ -28,6 +28,10 @@ type turnState struct {
 	Final     string
 	HaveFinal bool
 	Deltas    strings.Builder
+	// raw is the streamed text without the breaks added between model calls,
+	// to recognize a final text that is just the segments run together.
+	raw       strings.Builder
+	nextBreak bool
 	Err       string
 	Steps     []Activity
 	index     map[string]int
@@ -73,7 +77,7 @@ func (t *turnState) step(id, kind, title, detail, state string) {
 // reply is the agent's final text: the CLI's explicit result when it reports
 // one, otherwise the streamed text.
 func (t *turnState) reply() string {
-	if t.HaveFinal {
+	if t.HaveFinal && (t.raw.Len() == 0 || strings.TrimSpace(t.Final) != strings.TrimSpace(t.raw.String())) {
 		return strings.TrimSpace(t.Final)
 	}
 	return strings.TrimSpace(t.Deltas.String())
@@ -280,7 +284,16 @@ func parseMuse(line string, t *turnState) {
 	typ := str(ev, "payload_type")
 	switch {
 	case typ == "run.output.delta":
+		// Muse runs the model several times in a turn and joins the texts
+		// with nothing between them; keep them apart as paragraphs.
+		if t.nextBreak && t.Deltas.Len() > 0 {
+			t.Deltas.WriteString("\n\n")
+		}
+		t.nextBreak = false
 		t.Deltas.WriteString(str(p, "text"))
+		t.raw.WriteString(str(p, "text"))
+	case typ == "task.lifecycle.scheduled" && strings.HasPrefix(str(obj(p["event"]), "idempotency_key"), "model:"):
+		t.nextBreak = true
 	case strings.HasPrefix(typ, "run.terminal."):
 		if p["terminal"] == "completed" {
 			t.Final, t.HaveFinal = str(p, "text"), true

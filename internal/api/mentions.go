@@ -102,12 +102,16 @@ var mentionPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])@([A-Za-z0-9][A-Za-z
 
 // parseMentions returns the members addressed in text and whether @all was
 // used. Matching is case-insensitive and ignores trailing punctuation.
+var codeSpans = regexp.MustCompile("(?s)```.*?```|`[^`\n]*`")
+
 func parseMentions(text string, handles map[string]string) (members []string, all bool) {
 	byHandle := map[string]string{}
 	for member, handle := range handles {
 		byHandle[strings.ToLower(handle)] = member
 	}
 	seen := map[string]bool{}
+	// A handle quoted in code, such as `@agy` in a file listing, is not a mention.
+	text = codeSpans.ReplaceAllString(text, " ")
 	for _, match := range mentionPattern.FindAllStringSubmatch(text, -1) {
 		name := strings.ToLower(match[1])
 		if name == "all" || name == "everyone" {

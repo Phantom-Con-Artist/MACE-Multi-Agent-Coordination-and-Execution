@@ -193,3 +193,30 @@ func TestTurnReportsSilentSessionReset(t *testing.T) {
 		t.Fatalf("the new conversation should be recorded, got %q", a.NativeSession)
 	}
 }
+
+func TestMuseKeepsModelCallsApart(t *testing.T) {
+	var ts turnState
+	ts.index = map[string]int{}
+	lines := []string{
+		`{"payload_type":"task.lifecycle.scheduled","payload":{"event":{"idempotency_key":"model:1"}}}`,
+		`{"payload_type":"run.output.delta","payload":{"text":"Which feels most urgent?"}}`,
+		`{"payload_type":"task.lifecycle.scheduled","payload":{"event":{"idempotency_key":"tool:call_1"}}}`,
+		`{"payload_type":"task.lifecycle.scheduled","payload":{"event":{"idempotency_key":"model:2"}}}`,
+		`{"payload_type":"run.output.delta","payload":{"text":"Adding a layer I left out."}}`,
+		`{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"Which feels most urgent?Adding a layer I left out."}}`,
+	}
+	for _, l := range lines {
+		parseMuse(l, &ts)
+	}
+	if got := ts.reply(); got != "Which feels most urgent?\n\nAdding a layer I left out." {
+		t.Fatalf("model calls should be separate paragraphs, got %q", got)
+	}
+	// A final text that differs from the stream is still trusted as given.
+	var one turnState
+	one.index = map[string]int{}
+	parseMuse(`{"payload_type":"run.output.delta","payload":{"text":"draft"}}`, &one)
+	parseMuse(`{"payload_type":"run.terminal.completed","payload":{"terminal":"completed","text":"SECOND"}}`, &one)
+	if one.reply() != "SECOND" {
+		t.Fatalf("got %q", one.reply())
+	}
+}

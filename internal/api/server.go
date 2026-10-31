@@ -155,6 +155,8 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Get("/chats/{room}/receipts", handler.receipts)
 		r.Post("/presence", handler.presencePing)
 		r.Post("/presence/leave", handler.presenceLeave)
+		r.Get("/settings/presence", handler.presenceSettings)
+		r.Post("/settings/presence", handler.presenceSettings)
 		r.Get("/peers", handler.peers)
 		r.Post("/peers", handler.peers)
 		r.Get("/peers/{id}/sessions", handler.peerSessions)
