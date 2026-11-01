@@ -465,6 +465,7 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 	if _, err := h.syncFrom(ctx, n); err != nil {
 		log.Printf("[MACE] Sync from %s: %v", n.Name, err)
 	}
+	h.statusPull(ctx, n)
 }
 
 func (h *APIHandler) watchNodes(ctx context.Context) {

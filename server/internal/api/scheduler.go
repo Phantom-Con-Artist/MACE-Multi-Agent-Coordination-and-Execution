@@ -661,7 +661,22 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	if req.Hop > 0 && !sharePattern.MatchString(text) && !signalPattern.MatchString(text) && h.repeats(ctx, req.Room, req.Member, text) {
 		return
 	}
+	// Status tags first: [offer ...] must not be read as a flair.
+	text, statusFlair, offered := h.statusTags(ctx, req.Room, group, p, members, req.Member, text)
 	flair, role, text := h.takeTags(ctx, req.Room, group, req.Member, text)
+	if offered {
+		// An offer goes to a side chat with the agent who asked, not to this conversation.
+		posted = true
+		h.sched.Lock()
+		if current && req.Gen == rr.gen {
+			rr.inflight--
+		}
+		h.sched.Unlock()
+		return
+	}
+	if flair == "" {
+		flair = statusFlair
+	}
 	if flair == "done" && (p.Mode == "continuous" || p.Mode == "goal") {
 		goal = p.Mode == "goal"
 	}

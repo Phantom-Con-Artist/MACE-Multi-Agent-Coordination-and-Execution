@@ -35,6 +35,16 @@ class Session(context: Context) {
         if (seq > (seenPrefs.getLong(room, 0))) seenPrefs.edit().putLong(room, seq).apply()
     }
 
+    private val statusPrefs = context.getSharedPreferences("statuses", Context.MODE_PRIVATE)
+
+    /** Statuses the owner has opened, so the Status tab knows what is new. */
+    fun statusSeen(id: String) = statusPrefs.getBoolean("seen:$id", false)
+    fun markStatusSeen(id: String) = statusPrefs.edit().putBoolean("seen:$id", true).apply()
+
+    /** Notifications already shown for a status: "posted", then "reminded" after an hour. */
+    fun statusNotified(id: String, kind: String) = statusPrefs.getBoolean("$kind:$id", false)
+    fun markStatusNotified(id: String, kind: String) = statusPrefs.edit().putBoolean("$kind:$id", true).apply()
+
     /** Unlinks this phone. The hub's name and what was read stay, for the saved chats. */
     fun clear() {
         prefs.edit().remove("credential").apply()

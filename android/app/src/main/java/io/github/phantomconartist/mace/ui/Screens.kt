@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddComment
@@ -64,6 +65,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,7 +93,7 @@ import io.github.phantomconartist.mace.R
 import io.github.phantomconartist.mace.Screen
 import io.github.phantomconartist.mace.ui.theme.mace
 
-enum class Tab(val label: String) { Chats("Chats"), Agents("Agents"), Machines("Machines"), Settings("Settings") }
+enum class Tab(val label: String) { Chats("Chats"), Status("Status"), Agents("Agents"), Machines("Machines"), Settings("Settings") }
 
 /** What the home screen asks of the app. */
 class HomeActions(
@@ -179,6 +181,20 @@ fun HomeScreen(
     var confirm by remember { mutableStateOf(false) }
     var peek by remember { mutableStateOf<Conversation?>(null) }
     val unreadChats = state.conversations.count { it.unread > 0 }
+    val statuses by model.statuses.collectAsState()
+    val seenTick by model.seenStatuses.collectAsState()
+    val newStatuses = remember(statuses, seenTick) { statuses.count { it.open && !model.statusSeen(it.id) } }
+    var viewing by remember { mutableStateOf<Pair<List<io.github.phantomconartist.mace.data.AgentStatus>, Int>?>(null) }
+    // A tapped notification opens its status.
+    val openStatus by model.openStatus.collectAsState()
+    LaunchedEffect(openStatus, statuses) {
+        val id = openStatus ?: return@LaunchedEffect
+        val open = statuses.filter { it.open }
+        val i = open.indexOfFirst { it.id == id }
+        if (i >= 0) { tab = Tab.Status; viewing = open to i; model.showStatus(null) }
+    }
+
+    Box(Modifier.fillMaxSize()) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -234,8 +250,9 @@ fun HomeScreen(
                         icon = {
                             androidx.compose.material3.BadgedBox(badge = {
                                 if (t == Tab.Chats && unreadChats > 0) androidx.compose.material3.Badge(containerColor = mace.signal, contentColor = mace.onSignal) { Text(unreadChats.toString(), style = BadgeDigits) }
+                                if (t == Tab.Status && newStatuses > 0) androidx.compose.material3.Badge(containerColor = mace.signal, contentColor = mace.onSignal) { Text(newStatuses.toString(), style = BadgeDigits) }
                             }) {
-                                Icon(when (t) { Tab.Chats -> Icons.AutoMirrored.Rounded.Chat; Tab.Agents -> Icons.Rounded.SmartToy; Tab.Machines -> Icons.Rounded.Computer; Tab.Settings -> Icons.Rounded.Settings }, null)
+                                Icon(when (t) { Tab.Chats -> Icons.AutoMirrored.Rounded.Chat; Tab.Status -> Icons.Rounded.Campaign; Tab.Agents -> Icons.Rounded.SmartToy; Tab.Machines -> Icons.Rounded.Computer; Tab.Settings -> Icons.Rounded.Settings }, null)
                             }
                         },
                         label = { Text(t.label, fontWeight = if (tab == t) FontWeight.Bold else FontWeight.Normal) },
@@ -254,11 +271,18 @@ fun HomeScreen(
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
                 Tab.Chats -> ChatsTab(state, query, { query = it }, selected, { selected = it }, model, actions, onPeek = { peek = it })
+                Tab.Status -> StatusTab(statuses, model) { list, i -> viewing = list to i }
                 Tab.Agents -> AgentsTab(agents, model, actions)
                 Tab.Machines -> MachinesTab(model)
                 Tab.Settings -> SettingsTab(state.hub, model, actions.onSignOut, actions.onLinked, actions.onLink)
             }
         }
+    }
+    androidx.compose.animation.AnimatedVisibility(viewing != null, enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.96f),
+        exit = androidx.compose.animation.fadeOut()) {
+        val v = viewing
+        if (v != null) StatusViewer(v.first, v.second, model) { viewing = null }
+    }
     }
     if (confirm) {
         Confirm(

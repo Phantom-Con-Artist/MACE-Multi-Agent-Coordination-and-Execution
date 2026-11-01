@@ -124,6 +124,71 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _notice = MutableStateFlow<String?>(null)
     /** A short result or problem to show once, such as "Group created". */
     val notice: StateFlow<String?> = _notice
+    private val _statuses = MutableStateFlow<List<io.github.phantomconartist.mace.data.AgentStatus>>(emptyList())
+    /** The status board: what agents need, newest first. */
+    val statuses: StateFlow<List<io.github.phantomconartist.mace.data.AgentStatus>> = _statuses
+    private val _seenStatuses = MutableStateFlow(0)
+    /** Changes when the owner opens a status, so the tab's badge updates. */
+    val seenStatuses: StateFlow<Int> = _seenStatuses
+    private val notify = Notify(app)
+    /** The app is on screen; notifications are only for when it is not. */
+    @Volatile var foreground = true
+    private val _openStatus = MutableStateFlow<String?>(null)
+    /** A status to show, from a tapped notification. */
+    val openStatus: StateFlow<String?> = _openStatus
+
+    fun showStatus(id: String?) { _openStatus.value = id }
+    fun statusSeen(id: String) = session.statusSeen(id)
+    fun markStatusSeen(id: String) { if (!session.statusSeen(id)) { session.markStatusSeen(id); _seenStatuses.value++ } }
+    fun closeStatus(id: String) = act("Status closed.") { closeStatus(id) }
+
+    /** The agent a status's qualified ID (node::session) names, as this phone knows it. */
+    fun memberForStatus(id: String): Member? = members[id] ?: id.substringAfterLast("::").let { sid -> members.values.firstOrNull { it.id.substringAfterLast("::") == sid } }
+
+    /** A status's group or offer chat, if it lives on this hub. */
+    fun openStatusChat(room: String) {
+        if (room in groups || room.startsWith("side_")) open(room) else _notice.value = "That chat lives on another machine."
+    }
+
+    /** Replies to a status in its group, as a quote of it. */
+    fun replyToStatus(st: io.github.phantomconartist.mace.data.AgentStatus) {
+        if (st.room !in groups) { _notice.value = "That group lives on another machine."; return }
+        open(st.room)
+        _chat.update { it?.copy(insert = "> ${st.forName}: ${st.text}\n") }
+    }
+
+    private fun upsertStatus(st: io.github.phantomconartist.mace.data.AgentStatus) {
+        val known = _statuses.value.any { it.id == st.id }
+        _statuses.value = (listOf(st) + _statuses.value.filter { it.id != st.id }).sortedByDescending { it.at }
+        if (!known && st.open && !foreground && !session.statusNotified(st.id, "posted")) {
+            session.markStatusNotified(st.id, "posted")
+            notify.status(st, reminder = false)
+        }
+    }
+
+    private suspend fun loadStatuses() {
+        runCatching { hub().statuses() }.onSuccess { list -> _statuses.value = list.sortedByDescending { it.at } }
+    }
+
+    init {
+        // A status still open an hour after it was posted notifies once more,
+        // while MACE is in the background.
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(60_000)
+                if (foreground) continue
+                val now = java.time.OffsetDateTime.now()
+                _statuses.value.filter { it.open }.forEach { st ->
+                    val at = runCatching { java.time.OffsetDateTime.parse(st.at) }.getOrNull() ?: return@forEach
+                    if (java.time.Duration.between(at, now).toMinutes() >= 60 && !session.statusNotified(st.id, "reminded")) {
+                        session.markStatusNotified(st.id, "reminded")
+                        notify.status(st, reminder = true)
+                    }
+                }
+            }
+        }
+    }
+
     private var stream: Job? = null
     private var pendingRefresh: Job? = null
     private var working = mapOf<String, Set<String>>()
@@ -235,6 +300,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             try {
                 loadDirectory(remote = false)
                 loadInbox()
+                loadStatuses()
                 // Agents on other machines fill in afterwards; an offline
                 // machine must not hold up the list.
                 launch { runCatching { loadDirectory(remote = true); loadInbox() } }
@@ -696,6 +762,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 _chat.update { c -> if (c == null || c.id != room) c else c.copy(receipts = c.receipts + (member to seq)) }
             }
             "room", "session" -> refreshSoon(directory = true)
+            "status" -> runCatching { json.decodeFromJsonElement(io.github.phantomconartist.mace.data.AgentStatus.serializer(), e.data) }.getOrNull()?.let(::upsertStatus)
             "run" -> {
                 val id = e.data["id"]?.jsonPrimitive?.contentOrNullSafe()
                 val status = e.data["status"]?.jsonPrimitive?.contentOrNullSafe() ?: return

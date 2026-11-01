@@ -39,6 +39,10 @@ type APIHandler struct {
 	roomRuns  map[string]*roomRun
 	// sessionDocMu serializes read-modify-write of session documents.
 	sessionDocMu sync.Mutex
+	// statusMu guards status documents; statusActMu runs one offer, pick,
+	// or close at a time on a status's home machine.
+	statusMu    sync.Mutex
+	statusActMu sync.Mutex
 	// turnLocks lets one native turn run per agent; local inbox turns and
 	// turns requested by connected hosts wait for each other.
 	turnLocks sync.Map

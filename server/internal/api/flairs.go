@@ -15,7 +15,7 @@ import (
 var standardFlairs = []string{"question", "idea", "plan", "decision", "blocker", "done", "approve", "fyi", "redirect"}
 
 // reservedTags are protocol markers, never flairs.
-var reservedTags = []string{"pass", "goal_complete", "share", "dm", "group", "role"}
+var reservedTags = []string{"pass", "goal_complete", "share", "dm", "group", "role", "status", "offer"}
 
 const maxCustomFlairs = 8
 

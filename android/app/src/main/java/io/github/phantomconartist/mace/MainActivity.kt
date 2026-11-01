@@ -67,6 +67,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun takeShare(intent: Intent?) {
+        intent?.getStringExtra(Notify.EXTRA_STATUS)?.let { model.showStatus(it) }
         if (intent?.action == Intent.ACTION_SEND) {
             @Suppress("DEPRECATION")
             shared.value = intent.getParcelableExtra(Intent.EXTRA_STREAM)
@@ -77,6 +78,10 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         takeShare(intent)
     }
+
+    // Notifications are only for when MACE is not on screen.
+    override fun onStart() { super.onStart(); model.foreground = true }
+    override fun onStop() { super.onStop(); model.foreground = false }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -119,6 +124,17 @@ class MainActivity : FragmentActivity() {
         val open: (String) -> Unit = { path -> model.openFile(path) { startActivity(it) } }
 
         LaunchedEffect(notice) { notice?.let { snack.showSnackbar(it); model.noticeShown() } }
+        // Ask for notifications the first time a status arrives, when they would first matter.
+        val statuses by model.statuses.collectAsStateWithLifecycle()
+        val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        LaunchedEffect(statuses.isNotEmpty()) {
+            val prefs = getSharedPreferences("statuses", MODE_PRIVATE)
+            if (statuses.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("asked", false) &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                prefs.edit().putBoolean("asked", true).apply()
+                askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         // A file shared from another app goes to the next chat opened.
         LaunchedEffect(chat?.id, share) {
             val s = share

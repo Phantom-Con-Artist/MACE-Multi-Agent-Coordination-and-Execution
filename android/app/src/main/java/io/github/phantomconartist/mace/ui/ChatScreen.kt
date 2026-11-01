@@ -714,10 +714,13 @@ private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: Medi
         text = text.substringAfter('\n', "")
         Row(Modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f))) {
             // The quoted person's own color, as in a messenger group.
-            val who = quoteColor(q.groupValues[1])
+            // Agents quote names as the hub's transcript writes them: "Owner" for
+            // you, and "machine / Name" for an agent on another machine.
+            val name = q.groupValues[1].trim().trim('"').let { if (it == "Owner") "You" else it.substringAfter(" / ") }
+            val who = quoteColor(name)
             Box(Modifier.width(4.dp).fillMaxHeight().background(who))
             Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
-                Text(q.groupValues[1], style = MaterialTheme.typography.labelLarge, color = who, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(name, style = MaterialTheme.typography.labelLarge, color = who, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(q.groupValues[2], style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.75f), maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         }

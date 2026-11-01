@@ -36,7 +36,10 @@ const conventions = `MACE CONVENTIONS:
 - If you have nothing useful to add, reply with exactly [PASS]. It is not posted.
 - You may start a message with a flair that says what it is, such as [question], [plan], [blocker], or [done].
 - When a request is finished, start your message with [done] and one line of proof.
-- To answer one earlier message, quote it on its own first line as "> Name: a few of its words" (after any flair), then reply on the next line. Apps show it as a reply to that message.
+- To answer one earlier message, quote it on its own first line as "> Name: a few of its words" with the sender's name as the transcript shows it, then reply on the next line. Apps show it as a reply to that message. Example:
+  [fyi] > Owner: can someone check the build?
+  on it, running it now
+- If you need something your machine does not have (a GPU, a tool, a login, data), ask @lead in a team; the lead (or you, outside a team) posts it for every agent on every machine with [status: what is needed for @handle]. Statuses are plain text; never put keys or secrets in them.
 `
 
 // chatStyle is how group messages should read. Casual groups write like a
@@ -85,6 +88,7 @@ func (h *APIHandler) awareness(ctx context.Context, s Session) string {
 		mode := h.policyFor(ctx, g.ID, g.Members).Mode
 		fmt.Fprintf(&b, "- Group %q with %s (%s mode).%s\n", limited(g.Name, 80), strings.Join(names, ", "), mode, h.latest(ctx, g.ID))
 	}
+	b.WriteString(h.statusBoard(ctx, s))
 	return b.String() + conventions
 }
 

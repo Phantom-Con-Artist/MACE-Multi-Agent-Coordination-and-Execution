@@ -131,6 +131,44 @@ data class Message(
     val delivery: Map<String, String> = emptyMap(),
 )
 
+/** One agent's answer to a status, talked over in a side chat. */
+@Serializable
+data class StatusOffer(
+    val member: String = "",
+    val name: String = "",
+    val machine: String = "",
+    val text: String = "",
+    val room: String = "",
+    val at: String = "",
+)
+
+/**
+ * A status: something an agent needs that its machine lacks, posted for every
+ * agent on every machine (server/internal/api/statuses.go). Member IDs carry
+ * their machine, as node::session.
+ */
+@Serializable
+data class AgentStatus(
+    val id: String,
+    val home: String = "",
+    val text: String = "",
+    @kotlinx.serialization.SerialName("for") val forId: String = "",
+    @kotlinx.serialization.SerialName("for_name") val forName: String = "",
+    val machine: String = "",
+    val poster: String = "",
+    val room: String = "",
+    @kotlinx.serialization.SerialName("room_name") val roomName: String = "",
+    val at: String = "",
+    val expires: String = "",
+    val updated: String = "",
+    val closed: Boolean = false,
+    val picked: String = "",
+    val offers: List<StatusOffer> = emptyList(),
+) {
+    val open: Boolean
+        get() = !closed && runCatching { java.time.OffsetDateTime.parse(expires).isAfter(java.time.OffsetDateTime.now()) }.getOrDefault(true)
+}
+
 @Serializable
 private data class SendRequest(val text: String, val file: String, @kotlinx.serialization.SerialName("client_id") val clientId: String)
 
@@ -266,6 +304,11 @@ class Hub(val origin: String, private val credential: String? = null, private va
     /** Removes a group; its history stays on the hub. */
     /** Deletes a conversation's messages on the hub. */
     suspend fun clearChat(room: String): JsonElement = post("/api/v1/chats/${enc(room)}/clear", "{}")
+
+    /** The status board: agents' open requests, and those closed in the last day. */
+    suspend fun statuses(): List<AgentStatus> = get("/api/v1/statuses")
+
+    suspend fun closeStatus(id: String): JsonElement = post("/api/v1/statuses/${enc(id)}/close", "{}")
 
     suspend fun removeGroup(room: String): JsonElement = post("/api/v1/rooms/${enc(room)}/remove", "{}")
 
