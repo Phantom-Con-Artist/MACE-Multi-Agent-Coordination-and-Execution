@@ -157,6 +157,14 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         _chat.update { it?.copy(insert = "> ${st.forName}: ${st.text}\n") }
     }
 
+    private val _jobs = MutableStateFlow<List<io.github.phantomconartist.mace.data.Job>>(emptyList())
+    /** The job board, oldest first. */
+    val jobs: StateFlow<List<io.github.phantomconartist.mace.data.Job>> = _jobs
+
+    private suspend fun loadJobs() { runCatching { hub().jobs() }.onSuccess { _jobs.value = it } }
+
+    suspend fun registry(): io.github.phantomconartist.mace.data.Registry = hub().registry()
+
     private val _workspaces = MutableStateFlow<List<io.github.phantomconartist.mace.data.Workspace>>(emptyList())
     /** The hub's sessions, the current one marked. */
     val workspaces: StateFlow<List<io.github.phantomconartist.mace.data.Workspace>> = _workspaces
@@ -182,6 +190,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         _rooms.value = emptyMap()
         _agents.value = emptyList()
         _statuses.value = emptyList()
+        _jobs.value = emptyList()
         _chat.value = null
         _screen.update { (it as? Screen.Home)?.copy(conversations = emptyList(), loading = true) ?: it }
     }
@@ -361,6 +370,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 loadDirectory(remote = false)
                 loadInbox()
                 loadStatuses()
+                loadJobs()
                 loadWorkspaces()
                 // Agents on other machines fill in afterwards; an offline
                 // machine must not hold up the list.
@@ -823,6 +833,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 _chat.update { c -> if (c == null || c.id != room) c else c.copy(receipts = c.receipts + (member to seq)) }
             }
             "room", "session" -> refreshSoon(directory = true)
+            "job" -> runCatching { json.decodeFromJsonElement(io.github.phantomconartist.mace.data.Job.serializer(), e.data) }.getOrNull()?.let { j ->
+                _jobs.value = (_jobs.value.filter { it.id != j.id } + j).sortedBy { it.at }
+            }
             "workspace" -> {
                 val id = e.data["id"]?.jsonPrimitive?.contentOrNullSafe()
                 if (id != null && id != session.workspace) {

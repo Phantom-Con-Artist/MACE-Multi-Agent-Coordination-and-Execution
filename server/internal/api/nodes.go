@@ -75,6 +75,8 @@ type nodePong struct {
 	// Workspace is the session the machine runs, so linked machines settle
 	// on the one chosen last.
 	Workspace *workspaceSwitch `json:"workspace,omitempty"`
+	// Facts are the machine's measured resources (registry.go).
+	Facts *MachineFacts `json:"facts,omitempty"`
 }
 
 type nodeState struct {
@@ -404,7 +406,7 @@ func (h *APIHandler) ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.markNode(from.ID, "", time.Now())
-	writeJSON(w, 200, nodePong{Node: h.selfNode(), Nodes: h.knownNodes(r.Context()), Workspace: h.currentWorkspace(r.Context())})
+	writeJSON(w, 200, nodePong{Node: h.selfNode(), Nodes: h.knownNodes(r.Context()), Workspace: h.currentWorkspace(r.Context()), Facts: func() *MachineFacts { f := h.localFacts(); return &f }()})
 }
 
 // removeNode serves POST /api/v1/nodes/{id}/remove. The node is remembered as
@@ -479,6 +481,11 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 	}
 	h.nodeHealth.session[n.ID] = theirs
 	h.nodeHealth.mu.Unlock()
+	if pong.Facts != nil {
+		f := *pong.Facts
+		f.Node, f.Name = n.ID, n.Name // facts are always about the machine that answered
+		h.store.PutDocument(ctx, "machine-facts", n.ID, f)
+	}
 	if !h.sameSession(n.ID) {
 		return // It is switching sessions; nothing may cross until it has.
 	}
@@ -486,6 +493,7 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 		log.Printf("[MACE] Sync from %s: %v", n.Name, err)
 	}
 	h.statusPull(ctx, n)
+	h.jobPull(ctx, n)
 }
 
 // sameSession reports whether a node last reported the session this machine

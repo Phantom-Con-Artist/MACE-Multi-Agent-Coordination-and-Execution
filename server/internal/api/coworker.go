@@ -40,6 +40,7 @@ const conventions = `MACE CONVENTIONS:
 - To answer one earlier message, quote it on its own first line as "> Name: a few of its words" with the sender's name as the transcript shows it, then reply on the next line. Apps show it as a reply to that message. Example:
   [fyi] > Owner: can someone check the build?
   on it, running it now
+- Work is split into jobs. The lead posts [job: what to do | needs: tools, gpu, os, arch]; MACE checks every claim against the measured MACHINES. Claim one your machine suits with [claim <id>], report [progress <id>] at real milestones only, finish with [done <id>] and proof, hand it on with [pass <id> @handle], or release it with [drop <id>]. Share a running service for a job with [expose <port> for <id>]. The lead approves with [approve <id>].
 - If you need something your machine does not have (a GPU, a tool, a login, data), ask @lead in a team; the lead (or you, outside a team) posts it for every agent on every machine with [status: what is needed for @handle]. Statuses are plain text; never put keys or secrets in them.
 `
 
@@ -89,6 +90,9 @@ func (h *APIHandler) awareness(ctx context.Context, s Session) string {
 		mode := h.policyFor(ctx, g.ID, g.Members).Mode
 		fmt.Fprintf(&b, "- Group %q with %s (%s mode).%s\n", limited(g.Name, 80), strings.Join(names, ", "), mode, h.latest(ctx, g.ID))
 	}
+	b.WriteString(h.healthLine(ctx, s))
+	b.WriteString(h.machinesLine(ctx))
+	b.WriteString(h.jobBoard(ctx, s))
 	b.WriteString(h.statusBoard(ctx, s))
 	return b.String() + conventions
 }

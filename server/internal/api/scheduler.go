@@ -634,6 +634,7 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 		return
 	}
 	name := h.memberName(ctx, req.Member)
+	h.noteHealth(ctx, req.Member, res.Usage, err)
 	if err != nil {
 		h.sched.Lock()
 		rr.lastErr = err.Error()
@@ -663,6 +664,9 @@ func (h *APIHandler) execute(ctx context.Context, req *turnRequest) {
 	}
 	// Status tags first: [offer ...] must not be read as a flair.
 	text, statusFlair, offered := h.statusTags(ctx, req.Room, group, p, members, req.Member, text)
+	if !offered {
+		text = h.jobTags(ctx, req.Room, group, p, members, req.Member, text)
+	}
 	flair, role, text := h.takeTags(ctx, req.Room, group, req.Member, text)
 	if offered {
 		// An offer goes to a side chat with the agent who asked, not to this conversation.

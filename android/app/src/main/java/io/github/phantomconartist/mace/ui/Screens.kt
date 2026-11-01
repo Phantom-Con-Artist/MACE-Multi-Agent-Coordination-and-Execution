@@ -93,7 +93,7 @@ import io.github.phantomconartist.mace.R
 import io.github.phantomconartist.mace.Screen
 import io.github.phantomconartist.mace.ui.theme.mace
 
-enum class Tab(val label: String) { Chats("Chats"), Status("Status"), Agents("Agents"), Machines("Machines"), Settings("Settings") }
+enum class Tab(val label: String) { Chats("Chats"), Status("Board"), Agents("Agents"), Machines("Machines"), Settings("Settings") }
 
 /** What the home screen asks of the app. */
 class HomeActions(
@@ -183,6 +183,7 @@ fun HomeScreen(
     var peek by remember { mutableStateOf<Conversation?>(null) }
     val unreadChats = state.conversations.count { it.unread > 0 }
     val statuses by model.statuses.collectAsState()
+    val jobs by model.jobs.collectAsState()
     val seenTick by model.seenStatuses.collectAsState()
     val newStatuses = remember(statuses, seenTick) { statuses.count { it.open && !model.statusSeen(it.id) } }
     var viewing by remember { mutableStateOf<Pair<List<io.github.phantomconartist.mace.data.AgentStatus>, Int>?>(null) }
@@ -272,7 +273,7 @@ fun HomeScreen(
         Box(Modifier.padding(pad).fillMaxSize()) {
             when (tab) {
                 Tab.Chats -> ChatsTab(state, query, { query = it }, selected, { selected = it }, model, actions, onPeek = { peek = it })
-                Tab.Status -> StatusTab(statuses, model) { list, i -> viewing = list to i }
+                Tab.Status -> StatusTab(statuses, model, jobs) { list, i -> viewing = list to i }
                 Tab.Agents -> AgentsTab(agents, model, actions)
                 Tab.Machines -> MachinesTab(model)
                 Tab.Settings -> SettingsTab(state.hub, model, actions.onSignOut, actions.onLinked, actions.onLink, actions.onSessions)

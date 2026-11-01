@@ -101,11 +101,17 @@ private fun RingAvatar(st: AgentStatus, model: AppModel, seen: Boolean, size: In
 }
 
 @Composable
-fun StatusTab(statuses: List<AgentStatus>, model: AppModel, onView: (List<AgentStatus>, Int) -> Unit) {
+fun StatusTab(statuses: List<AgentStatus>, model: AppModel, jobs: List<io.github.phantomconartist.mace.data.Job> = emptyList(), onView: (List<AgentStatus>, Int) -> Unit) {
     val open = statuses.filter { it.open }
     val closed = statuses.filter { !it.open }
+    val activeJobs = jobs.filter { it.state != "approved" }
+    val doneJobs = jobs.filter { it.state == "approved" }.takeLast(5)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
-        if (statuses.isEmpty()) {
+        if (activeJobs.isNotEmpty() || doneJobs.isNotEmpty()) item { StatusSection("Jobs") }
+        items(activeJobs.size, key = { "j" + activeJobs[it].id }) { i -> JobRow(activeJobs[i]) }
+        items(doneJobs.size, key = { "d" + doneJobs[it].id }) { i -> JobRow(doneJobs[i]) }
+        if (statuses.isNotEmpty() && jobs.isNotEmpty()) item { StatusSection("Needs") }
+        if (statuses.isEmpty() && jobs.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Rounded.Campaign, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
@@ -117,7 +123,7 @@ fun StatusTab(statuses: List<AgentStatus>, model: AppModel, onView: (List<AgentS
                 }
             }
         }
-        if (open.isNotEmpty()) item { StatusSection("Open") }
+        if (open.isNotEmpty() && jobs.isEmpty()) item { StatusSection("Open") }
         items(open.size, key = { "o" + open[it].id }) { i -> StatusRow(open[i], model) { onView(open, i) } }
         if (closed.isNotEmpty()) item { StatusSection("Recently closed") }
         items(closed.size, key = { "c" + closed[it].id }) { i -> StatusRow(closed[i], model) { onView(closed, i) } }
@@ -251,5 +257,32 @@ private fun OfferRow(o: StatusOffer, picked: Boolean, onOpen: () -> Unit) {
         Text(listOf(o.name, o.machine).filter { it.isNotEmpty() }.joinToString(" · ") + if (picked) "  ✓ picked" else "",
             color = Color.White, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(o.text, color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** A job: its state as a chip, who holds it on which machine, and its latest step. */
+@Composable
+private fun JobRow(j: io.github.phantomconartist.mace.data.Job) {
+    val (label, color) = when (j.state) {
+        "open" -> "Unclaimed" to MaterialTheme.colorScheme.tertiary
+        "claimed" -> "Working" to mace.online
+        "review" -> "In review" to mace.signal
+        else -> "Approved" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.Top) {
+        Text(j.id, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(52.dp).padding(top = 3.dp))
+        Column(Modifier.weight(1f)) {
+            Text(j.title, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            val who = if (j.ownerName.isNotEmpty()) "${j.ownerName} on ${j.machine}" else if (j.needs.isNotEmpty()) "Needs " + j.needs.joinToString(", ") else j.roomName
+            Text(listOf(who, statusAge(j.updated.ifEmpty { j.at })).filter { it.isNotEmpty() }.joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val step = if (j.state == "review" || j.state == "approved") j.proof else j.progress
+            if (step.isNotEmpty()) Text(step, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            j.services.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 1) }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = color,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(color.copy(alpha = 0.14f)).padding(horizontal = 7.dp, vertical = 2.dp))
     }
 }

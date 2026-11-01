@@ -131,6 +131,50 @@ data class Message(
     val delivery: Map<String, String> = emptyMap(),
 )
 
+/** A job on the board (server/internal/api/jobs.go). */
+@Serializable
+data class Job(
+    val id: String,
+    val title: String = "",
+    val needs: List<String> = emptyList(),
+    val room: String = "",
+    @kotlinx.serialization.SerialName("room_name") val roomName: String = "",
+    val owner: String = "",
+    @kotlinx.serialization.SerialName("owner_name") val ownerName: String = "",
+    val machine: String = "",
+    val state: String = "open",
+    val progress: String = "",
+    val proof: String = "",
+    val services: List<String> = emptyList(),
+    val at: String = "",
+    val updated: String = "",
+)
+
+@Serializable
+data class Gpu(val vendor: String = "", val model: String = "", @kotlinx.serialization.SerialName("memory_gb") val memoryGb: Int = 0, val cuda: String = "")
+
+@Serializable
+data class Battery(val percent: Int = 0, val charging: Boolean = false)
+
+/** One machine's measured resources (server/internal/api/registry.go). */
+@Serializable
+data class MachineFacts(
+    val node: String = "",
+    val name: String = "",
+    @kotlinx.serialization.SerialName("os_name") val osName: String = "",
+    val version: String = "",
+    val arch: String = "",
+    val cores: Int = 0,
+    @kotlinx.serialization.SerialName("memory_gb") val memoryGb: Int = 0,
+    val gpus: List<Gpu> = emptyList(),
+    val tools: List<String> = emptyList(),
+    @kotlinx.serialization.SerialName("disk_gb") val diskGb: Int = 0,
+    val battery: Battery? = null,
+)
+
+@Serializable
+data class Registry(val machines: List<MachineFacts> = emptyList(), val busy: Map<String, String> = emptyMap())
+
 /** A session on the hub (server/internal/api/workspaces.go). */
 @Serializable
 data class Workspace(
@@ -314,6 +358,12 @@ class Hub(val origin: String, private val credential: String? = null, private va
     /** Removes a group; its history stays on the hub. */
     /** Deletes a conversation's messages on the hub. */
     suspend fun clearChat(room: String): JsonElement = post("/api/v1/chats/${enc(room)}/clear", "{}")
+
+    /** The job board: work the lead split up, who holds it, and its state. */
+    suspend fun jobs(): List<Job> = get("/api/v1/jobs")
+
+    /** What each machine has, measured by MACE on it. */
+    suspend fun registry(): Registry = get("/api/v1/registry")
 
     /** Sessions: each has its own agents, groups, and history; one runs at a time. */
     suspend fun workspaces(): List<Workspace> = get("/api/v1/workspaces")

@@ -41,6 +41,8 @@ type APIHandler struct {
 	sessionDocMu sync.Mutex
 	// statusMu guards status documents; statusActMu runs one offer, pick,
 	// or close at a time on a status's home machine.
+	// facts caches this machine's measured resources (registry.go).
+	facts factsCache
 	// dataDir holds the session databases; restart moves the daemon into a
 	// newly chosen session (see workspaces.go).
 	dataDir     string

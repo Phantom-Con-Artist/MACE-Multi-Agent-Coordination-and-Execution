@@ -139,7 +139,11 @@ fun MachinesTab(model: AppModel) {
     fun web(page: String) { model.webUrl(page)?.let { openWeb(context, it, bar) } }
     var nodes by remember { mutableStateOf<List<Node>?>(null) }
     var problem by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { runCatching { model.nodes() }.onSuccess { nodes = it }.onFailure { problem = it.message } }
+    var facts by remember { mutableStateOf<io.github.phantomconartist.mace.data.Registry?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching { model.nodes() }.onSuccess { nodes = it }.onFailure { problem = it.message }
+        facts = runCatching { model.registry() }.getOrNull()
+    }
     LazyColumn(Modifier.fillMaxSize()) {
         item {
             Text("Every computer joined to your hub. Agents can run on any of them that is online.", style = MaterialTheme.typography.bodyMedium,
@@ -171,6 +175,16 @@ fun MachinesTab(model: AppModel) {
                         color = if (n.self || n.available) mace.online else mace.down,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
+                    // What MACE measured on the machine: what agents and jobs are matched by.
+                    facts?.machines?.firstOrNull { it.node == n.id }?.let { f ->
+                        val gpu = f.gpus.joinToString(", ") { g -> g.model + if (g.cuda.isNotEmpty()) " (CUDA ${g.cuda})" else "" }.ifEmpty { "No GPU" } +
+                            (facts?.busy?.get(n.id)?.let { " · busy with $it" } ?: "")
+                        val power = f.battery?.let { b -> if (b.charging) "Battery ${b.percent}%, charging" else "On battery ${b.percent}%" }
+                        Text(listOfNotNull("${f.osName} ${f.version}".trim(), f.arch, "${f.cores} cores", "${f.memoryGb} GB", gpu, power).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (f.tools.isNotEmpty()) Text(f.tools.joinToString(" "), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }

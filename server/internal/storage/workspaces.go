@@ -21,6 +21,7 @@ import (
 var globalKinds = map[string]bool{
 	"node": true, "node-removed": true, "peer": true, "device": true, "push": true,
 	"setting": true, "signin-code": true, "join-invite": true, "workspace": true,
+	"machine-facts": true,
 }
 
 // docs is the database that holds a kind of document.
