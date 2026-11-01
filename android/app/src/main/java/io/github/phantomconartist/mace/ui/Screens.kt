@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Chat
-import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.Check
@@ -209,7 +208,7 @@ fun HomeScreen(
                             DropdownMenuItem({ Text("New group") }, onClick = { menu = false; actions.onNewGroup() })
                             DropdownMenuItem({ Text("Start an agent") }, onClick = { menu = false; actions.onStartAgent() })
                             DropdownMenuItem({ Text("Settings") }, onClick = { menu = false; tab = Tab.Settings })
-                            DropdownMenuItem({ Text("Sign out") }, leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Logout, null) }, onClick = { menu = false; actions.onSignOut() })
+                            DropdownMenuItem({ Text("Sign out") }, onClick = { menu = false; actions.onSignOut() })
                         }
                     },
                 )
@@ -234,7 +233,7 @@ fun HomeScreen(
                         onClick = { tab = t; selected = emptySet() },
                         icon = {
                             androidx.compose.material3.BadgedBox(badge = {
-                                if (t == Tab.Chats && unreadChats > 0) androidx.compose.material3.Badge(containerColor = mace.signal, contentColor = mace.onSignal) { Text(unreadChats.toString()) }
+                                if (t == Tab.Chats && unreadChats > 0) androidx.compose.material3.Badge(containerColor = mace.signal, contentColor = mace.onSignal) { Text(unreadChats.toString(), style = BadgeDigits) }
                             }) {
                                 Icon(when (t) { Tab.Chats -> Icons.AutoMirrored.Rounded.Chat; Tab.Agents -> Icons.Rounded.SmartToy; Tab.Machines -> Icons.Rounded.Computer; Tab.Settings -> Icons.Rounded.Settings }, null)
                             }
@@ -315,7 +314,13 @@ private fun ChatsTab(
                     }
                 }
             }
-            state.problem?.let { item { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
+            state.problem?.let {
+                item {
+                    Text(it, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 14.dp, vertical = 10.dp))
+                }
+            }
             if (!state.loading && state.problem == null && shown.isEmpty()) {
                 item {
                     Text(
@@ -376,10 +381,6 @@ private fun ConversationRow(c: Conversation, media: MediaLoader, selected: Boole
             }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (asleep && !c.working) {
-                    Text("Offline", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 5.dp, vertical = 1.dp))
-                }
                 Text(
                     if (c.working) "working…" else c.preview,
                     Modifier.weight(1f), fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -388,7 +389,7 @@ private fun ConversationRow(c: Conversation, media: MediaLoader, selected: Boole
                 if (c.unread > 0) {
                     Spacer(Modifier.width(8.dp))
                     Box(Modifier.height(22.dp).widthIn(min = 22.dp).clip(CircleShape).background(mace.signal).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-                        Text(if (c.unread > 99) "99+" else c.unread.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = mace.onSignal)
+                        Text(if (c.unread > 99) "99+" else c.unread.toString(), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = mace.onSignal, style = BadgeDigits)
                     }
                 }
             }
@@ -417,3 +418,11 @@ fun QuickView(c: Conversation, media: MediaLoader, onDismiss: () -> Unit, onOpen
         }
     }
 }
+
+/** Digits centered on their box: a count in a badge sits on the font's baseline otherwise, below the middle. */
+val BadgeDigits = androidx.compose.ui.text.TextStyle(
+    lineHeight = 12.sp,
+    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+    ),
+)

@@ -109,7 +109,7 @@ fun AgentRow(a: Member, media: MediaLoader, trailing: @Composable (() -> Unit)? 
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(a.name, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull("@${a.handle}".takeIf { a.handle.isNotEmpty() }, if (!a.reachable) "Offline: its machine is down" else statusWord(a.status), a.role.ifEmpty { null } ?: a.machine ?: "this hub").joinToString(" · "),
+            Text(listOfNotNull("@${a.handle}".takeIf { a.handle.isNotEmpty() }, if (!a.reachable) "Offline" else statusWord(a.status), a.role.ifEmpty { null } ?: a.machine ?: "this hub").joinToString(" · "),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         trailing?.invoke()

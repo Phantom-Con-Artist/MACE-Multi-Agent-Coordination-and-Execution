@@ -104,6 +104,12 @@ class MediaLoader(private val hub: () -> Hub) {
 
     fun cached(key: String): ImageBitmap? = cache.get(key)?.asImageBitmap()
 
+    private val ratios = java.util.concurrent.ConcurrentHashMap<String, Float>()
+
+    /** A picture's shape once seen, so its card keeps its size even when the bitmap left the cache. */
+    fun ratio(path: String): Float? = ratios[path]?.coerceIn(0.6f, 1.8f)
+    fun rememberRatio(path: String, r: Float) { ratios[path] = r }
+
     /** A picture from the hub, shrunk to about maxPx on its longer side. */
     suspend fun image(url: String, maxPx: Int): ImageBitmap? {
         val key = "$url@$maxPx"
@@ -173,13 +179,16 @@ fun FileCard(path: String, ink: Color, width: Dp, media: MediaLoader, onOpen: (S
     when (kindOf(path)) {
         FileKind.Image, FileKind.Video -> {
             val video = kindOf(path) == FileKind.Video
-            var img by remember(path) { mutableStateOf<ImageBitmap?>(null) }
-            var tried by remember(path) { mutableStateOf(false) }
+            // Start from the cache, so a picture scrolled back into view shows at
+            // once and at its own shape instead of a spinner that then resizes.
+            var img by remember(path) { mutableStateOf(media.cached(if (video) "frame:$path@720" else "${media.fileUrl(path)}@1080")) }
+            var tried by remember(path) { mutableStateOf(img != null) }
             LaunchedEffect(path) {
-                img = if (video) media.videoFrame(path, 720) else media.image(media.fileUrl(path), 1080)
+                if (img == null) img = if (video) media.videoFrame(path, 720) else media.image(media.fileUrl(path), 1080)
                 tried = true
             }
-            val ratio = img?.let { (it.width.toFloat() / it.height).coerceIn(0.6f, 1.8f) } ?: 1.3f
+            val ratio = img?.let { (it.width.toFloat() / it.height).coerceIn(0.6f, 1.8f) } ?: media.ratio(path) ?: 1.3f
+            img?.let { media.rememberRatio(path, it.width.toFloat() / it.height) }
             Box(
                 Modifier.widthIn(max = width - 20.dp).width(width - 20.dp).aspectRatio(ratio).clip(RoundedCornerShape(8.dp))
                     .background(ink.copy(alpha = 0.08f)).clickable { onOpen(path) },
@@ -257,4 +266,18 @@ class Sounds(context: Context) {
     fun sent() = play(send, 0.5f)
 
     fun received() = play(receive, 0.6f)
+}
+
+/** A square crop of a picture or a video's first frame, for an album tile. */
+@Composable
+fun Thumb(path: String, ink: Color, media: MediaLoader, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val video = kindOf(path) == FileKind.Video
+    var img by remember(path) { mutableStateOf(media.cached(if (video) "frame:$path@720" else "${media.fileUrl(path)}@1080")) }
+    LaunchedEffect(path) { if (img == null) img = if (video) media.videoFrame(path, 720) else media.image(media.fileUrl(path), 1080) }
+    Box(modifier.background(ink.copy(alpha = 0.08f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        img?.let { Image(it, fileName(path), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        if (video) Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.PlayArrow, "Play", tint = Color.White, modifier = Modifier.size(26.dp))
+        }
+    }
 }

@@ -139,8 +139,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     /** Shows the saved chat list at once; agents count as unreachable until the hub answers. */
     private fun restore() {
         val s = cache.snapshot() ?: return
-        members = (s.agents.map { Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model, it.role, it.photo, reachable = false) } +
-            s.remote.map { r -> Member(r.agent.id, r.agent.name, r.agent.handle, r.agent.provider, r.agent.status, r.machine, r.agent.folder, r.agent.model, r.agent.role, r.agent.photo, reachable = false) })
+        members = (s.agents.filter { it.status != "removed" }.map { Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model, it.role, it.photo, reachable = false) } +
+            s.remote.filter { it.agent.status != "removed" }.map { r -> Member(r.agent.id, r.agent.name.removePrefix(r.machine + " / "), r.agent.handle, r.agent.provider, r.agent.status, r.machine, r.agent.folder, r.agent.model, r.agent.role, r.agent.photo, reachable = false) })
             .associateBy { it.id }
         remoteSeen = s.remote
         groups = s.rooms.associateBy { it.id }
@@ -254,11 +254,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         local.filter { it.status != "removed" }.forEach { found[it.id] = Member(it.id, it.name, it.handle, it.provider, it.status, null, it.folder, it.model, it.role, it.photo) }
         // Agents on other machines carry the machine's ID before "::".
         if (remote) viewModelScope.run {
-            hub.peers().map { p ->
+            val peers = hub.peers()
+            // Agents of a machine that is no longer linked leave the list too.
+            found.keys.removeAll { k -> "::" in k && peers.none { k.startsWith(it.id + "::") } }
+            peers.map { p ->
                 async {
                     val list = runCatching { hub.peerAgents(p.id) }.getOrNull()
                     // A machine that does not answer keeps its agents listed, marked unreachable.
                     if (list == null) found.keys.filter { it.startsWith(p.id + "::") }.forEach { k -> found[k] = found[k]!!.copy(reachable = false) }
+                    // A machine that answers is the truth for its agents: ones it removed leave the list.
+                    if (list != null) synchronized(found) { found.keys.removeAll { it.startsWith(p.id + "::") } }
                     list?.let { l -> synchronized(this@AppModel) { remoteSeen = remoteSeen.filter { it.machine != p.name } + l.map { io.github.phantomconartist.mace.data.RemoteAgent(p.name, it) } } }
                     list.orEmpty().filter { it.status != "removed" }.map { a -> Member(a.id, a.name.removePrefix(p.name + " / "), a.handle, a.provider, a.status, p.name, a.folder, a.model, a.role, a.photo) }
                 }
@@ -332,7 +337,12 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 markSeen()
             } catch (e: IOException) {
                 val saved = _chat.value?.messages?.isNotEmpty() == true
-                _chat.update { c -> c?.takeIf { it.id == id }?.copy(loading = false, problem = if (saved) "Showing saved messages. " + explain(e) else explain(e)) }
+                _chat.update { c -> c?.takeIf { it.id == id }?.copy(loading = false, problem = when {
+                    // One short line over saved messages; the chat list explains the rest.
+                    saved && (e !is HubException || e.status in 502..504) -> "Hub not answering. Showing saved messages."
+                    saved -> "Showing saved messages. " + explain(e)
+                    else -> explain(e)
+                }) }
             }
         }
     }
@@ -357,7 +367,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     /** Puts @handle into the composer, to address one agent in a group. */
     fun mention(member: String) {
-        val handle = members[member]?.handle?.takeIf { it.isNotEmpty() } ?: return
+        val handle = _chat.value?.let { io.github.phantomconartist.mace.ui.roomHandles(it.members.distinctBy { m -> m.id })[member] }
+            ?: members[member]?.handle?.takeIf { it.isNotEmpty() } ?: return
         _chat.update { it?.copy(insert = "@$handle ") }
     }
 
@@ -462,9 +473,11 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 hub().block()
-                runCatching { loadDirectory(); loadInbox() }
+                // Report the result now; the directory refresh asks every linked
+                // machine and must not hold the answer back.
                 done?.let { _notice.value = it }
                 then()
+                runCatching { loadDirectory(); loadInbox() }
             } catch (e: IOException) {
                 _notice.value = explain(e)
             }
@@ -534,12 +547,23 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     /** Starts an agent and opens its chat. */
     fun startAgent(machine: String?, provider: String, folder: String) {
+        // Say at once that something is happening; the CLI can take a few seconds to start.
+        _notice.value = "Starting ${provider.replaceFirstChar { it.uppercase() }}…"
         viewModelScope.launch {
             try {
                 val a = hub().startAgent(machine, provider, folder)
-                runCatching { loadDirectory(); loadInbox() }
-                val id = members.keys.firstOrNull { it == a.id || it.endsWith("::" + a.id) } ?: a.id
+                // Open the new chat as soon as the hub answers. The full directory,
+                // which asks every linked machine, refreshes behind it.
+                val id = members.keys.firstOrNull { it == a.id || it.endsWith("::" + a.id) }
+                    ?: if (machine != null && "::" !in a.id) "$machine::${a.id}" else a.id
+                if (id !in members) {
+                    val place = machine?.let { m -> members.values.firstOrNull { it.id.startsWith("$m::") }?.machine ?: m }
+                    members = members + (id to Member(id, a.name.substringAfter(" / "), a.handle, a.provider, a.status, place, a.folder, a.model, a.role, a.photo))
+                    _agents.value = members.values.sortedBy { it.name.lowercase() }
+                }
+                _notice.value = null
                 open(id)
+                viewModelScope.launch { runCatching { loadDirectory(); loadInbox() } }
             } catch (e: IOException) {
                 _notice.value = explain(e)
             }

@@ -36,6 +36,7 @@ const conventions = `MACE CONVENTIONS:
 - If you have nothing useful to add, reply with exactly [PASS]. It is not posted.
 - You may start a message with a flair that says what it is, such as [question], [plan], [blocker], or [done].
 - When a request is finished, start your message with [done] and one line of proof.
+- To answer one earlier message, quote it on its own first line as "> Name: a few of its words" (after any flair), then reply on the next line. Apps show it as a reply to that message.
 `
 
 // chatStyle is how group messages should read. Casual groups write like a

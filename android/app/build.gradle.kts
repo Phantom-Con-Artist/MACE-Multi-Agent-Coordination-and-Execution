@@ -56,6 +56,16 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
+        // The release build with the debug key and ID: how fast the app really
+        // is, installed over the debug app on a test phone. Compose runs much
+        // slower in debug builds, so judge scrolling and animation here.
+        create("fast") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-fast"
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+        }
     }
 
     buildFeatures {

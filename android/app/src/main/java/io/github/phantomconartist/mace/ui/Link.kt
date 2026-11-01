@@ -136,7 +136,7 @@ fun LinkScreen(state: Screen.SignIn, onSignIn: (String) -> Unit, onBack: (() -> 
                             com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder().setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE).build(),
                         ).startScan()
                             .addOnSuccessListener { code -> code.rawValue?.let { go(it) } }
-                            .addOnFailureListener { scanProblem = "The scanner could not start. Type the link instead." }
+                            .addOnFailureListener { e -> scanProblem = "The scanner could not start" + (e.message?.let { ": $it" } ?: "") + ". Type the link instead." }
                     },
                     enabled = !state.busy,
                     colors = ButtonDefaults.buttonColors(containerColor = mace.signal, contentColor = mace.onSignal),

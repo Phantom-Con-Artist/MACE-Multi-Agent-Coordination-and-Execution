@@ -370,17 +370,19 @@ private fun RoleDialog(name: String, current: String, onSave: (String) -> Unit, 
     )
 }
 
+/** Agents to add, in a sheet as tall as the list needs, so names are not cut short. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddMemberDialog(candidates: List<Member>, model: AppModel, onPick: (Member) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add an agent") },
-        text = {
-            if (candidates.isEmpty()) Text("Every agent is already here. Start another from the Agents tab.")
-            else LazyColumn { items(candidates, key = { it.id }) { a -> AgentRow(a, model.media) { onPick(a) } } }
-        },
-        confirmButton = { TextButton(onDismiss) { Text("Close") } },
-    )
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text("Add an agent", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
+        if (candidates.isEmpty()) {
+            Text("Every agent is already here. Start another from the Agents tab.", style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp).navigationBarsPadding())
+        } else LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), modifier = Modifier.navigationBarsPadding()) {
+            items(candidates, key = { it.id }) { a -> AgentRow(a, model.media) { onPick(a) } }
+        }
+    }
 }
 
 /** How the agents in a conversation work, the same choices as on the desktop. */

@@ -53,8 +53,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +63,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextRange
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -113,7 +117,28 @@ data class Suggestion(
     val everyone: Boolean = false,
 )
 
-private val mentionAtCaret = Regex("""(^|\s)@([\w.-]*)$""")
+private val mentionAtCaret = Regex("""(^|\s)@([\w.@-]*)$""")
+
+private val handleUnsafe = Regex("""[^a-z0-9._-]+""")
+
+/** A machine name as the hub writes it in a handle: lowercase, no spaces. */
+private fun slug(name: String) = handleUnsafe.replace(name.trim().lowercase(), "-").trim('-', '.', '_').ifEmpty { "agent" }
+
+/**
+ * The handle each member answers to in this chat, as the hub decides it
+ * (server/internal/api/mentions.go roomHandles): a handle two members share
+ * gets the machine's name, as agy@pc, or agy@here for this hub's agent.
+ */
+fun roomHandles(members: List<Member>): Map<String, String> {
+    val count = members.groupingBy { it.handle }.eachCount()
+    return members.filter { it.handle.isNotEmpty() }.associate { m ->
+        m.id to when {
+            (count[m.handle] ?: 0) < 2 -> m.handle
+            "::" in m.id -> m.handle + "@" + slug(m.machine ?: m.id.substringBefore("::"))
+            else -> m.handle + "@here"
+        }
+    }
+}
 
 /** Coworkers to mention at the caret, everyone first, as in a messenger group. */
 fun mentionSuggestions(draft: TextFieldValue, members: List<Member>): List<Suggestion> {
@@ -123,8 +148,11 @@ fun mentionSuggestions(draft: TextFieldValue, members: List<Member>): List<Sugge
     val start = before.length - m.groupValues[2].length
     fun next(h: String) = draft.text.substring(0, start) + h + " " + draft.text.substring(before.length)
     val all = Suggestion("@all", "all", "Mention every agent in this chat", next("all"), everyone = true).takeIf { "all".startsWith(q) }
-    val people = members.filter { it.handle.isNotEmpty() && (it.handle.lowercase().startsWith(q) || it.name.lowercase().contains(q)) }.map {
-        Suggestion("@" + it.handle, it.name, listOfNotNull("@" + it.handle, it.machine, statusWord(it.status)).joinToString(" · "), next(it.handle), member = it)
+    // Agents on two machines can share a handle, so rows are told apart by agent ID.
+    val unique = members.distinctBy { it.id }
+    val handles = roomHandles(unique)
+    val people = unique.mapNotNull { m -> handles[m.id]?.let { m to it } }.filter { (m, h) -> h.lowercase().startsWith(q) || m.name.lowercase().contains(q) }.map { (m, h) ->
+        Suggestion(m.id, m.name, listOfNotNull("@" + h, m.machine?.takeIf { "@" !in h }, statusWord(m.status)).joinToString(" · "), next(h), member = m)
     }
     return listOfNotNull(all) + people
 }
@@ -179,16 +207,18 @@ fun commandSuggestions(text: String, models: Models?, folders: Pair<String, List
 
 /** The floating card above the composer: mentions, commands, models, folders. */
 @Composable
-fun SuggestionMenu(options: List<Suggestion>, onPick: (Suggestion) -> Unit) {
+fun SuggestionMenu(options: List<Suggestion>, onPick: (Suggestion) -> Unit, modifier: Modifier = Modifier) {
     if (options.isEmpty()) return
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(18.dp),
         shadowElevation = 6.dp,
-        modifier = Modifier.padding(start = 8.dp, end = 64.dp, bottom = 4.dp),
+        modifier = modifier.padding(start = 8.dp, end = 64.dp, bottom = 4.dp),
     ) {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp).padding(vertical = 6.dp)) {
-            items(options, key = { it.id + it.text }) { o ->
+            // No item keys: two rows can carry the same text (a shared handle, a model
+            // listed as "default"), and a repeated key crashes the list.
+            items(options) { o ->
                 Row(Modifier.fillMaxWidth().clickable { onPick(o) }.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     when {
                         o.member != null -> Avatar(o.member.name, o.member.id, false, 40)
@@ -223,10 +253,13 @@ fun Composer(
     onAttach: () -> Unit,
     onClearAttachment: () -> Unit,
     onSend: () -> Unit,
+    focus: FocusRequester = remember { FocusRequester() },
 ) {
     val ready = draft.text.isNotBlank() || attachment.isNotEmpty()
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
-        SuggestionMenu(suggestions, onPick)
+        // The menu is weighted so the field is measured first: with the keyboard
+        // up and little height left, the menu shrinks and the field keeps its size.
+        SuggestionMenu(suggestions, onPick, Modifier.weight(1f, fill = false))
         Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 2.dp, bottom = 6.dp), verticalAlignment = Alignment.Bottom) {
             Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.weight(1f)) {
                 Column {
@@ -256,7 +289,7 @@ fun Composer(
                             modifier = Modifier.padding(start = 12.dp, top = 6.dp),
                         )
                     }
-                    Row(verticalAlignment = Alignment.Bottom) {
+                    Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.Bottom) {
                         val key = if (group) "@" else "/"
                         IconButton(
                             onClick = {
@@ -270,18 +303,23 @@ fun Composer(
                             Icon(if (group) Icons.Rounded.AlternateEmail else Icons.Rounded.Terminal, if (group) "Mention an agent" else "Commands",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        TextField(
+                        // A plain field: one line of text sits on the same middle as the
+                        // 48dp icons beside it, and longer drafts grow upward from there.
+                        val textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface)
+                        BasicTextField(
                             value = draft,
                             onValueChange = onDraft,
-                            placeholder = { Text("Message", style = MaterialTheme.typography.bodyLarge) },
-                            textStyle = MaterialTheme.typography.bodyLarge,
+                            textStyle = textStyle,
                             maxLines = 6,
-                            colors = TextFieldDefaults.colors(
-                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
-                                cursorColor = MaterialTheme.colorScheme.primary,
-                            ),
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp).focusRequester(focus),
+                            decorationBox = { field ->
+                                Box(Modifier.heightIn(min = 48.dp).padding(vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+                                    if (draft.text.isEmpty()) Text("Message", style = textStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    field()
+                                }
+                            },
                         )
                         IconButton(onClick = onAttach, modifier = Modifier.size(48.dp)) {
                             Icon(Icons.Rounded.AttachFile, "Attach a file from the hub", tint = MaterialTheme.colorScheme.onSurfaceVariant,

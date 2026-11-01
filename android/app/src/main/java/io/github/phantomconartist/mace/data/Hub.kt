@@ -120,6 +120,8 @@ data class Message(
     val file: String = "",
     val kind: String = "",
     val flair: String = "",
+    /** A role the sender claimed with this message. */
+    val role: String = "",
     val at: String = "",
     val seq: Long = 0,
     @kotlinx.serialization.SerialName("client_id") val clientId: String = "",
@@ -253,7 +255,7 @@ class Hub(val origin: String, private val credential: String? = null, private va
         if (!res.isSuccessful) {
             val text = res.body.string()
             res.close()
-            throw HubException(text.trim().ifEmpty { "The hub answered ${res.code}." }, res.code)
+            throw HubException(text.trim().ifEmpty { unanswered(res.code) }, res.code)
         }
         return res
     }
@@ -377,10 +379,17 @@ class Hub(val origin: String, private val credential: String? = null, private va
         http.newCall(builder.build()).execute().use { res ->
             val text = res.body.string()
             if (!res.isSuccessful) {
-                throw HubException(text.trim().ifEmpty { "The hub answered ${res.code}." }, res.code)
+                throw HubException(text.trim().ifEmpty { unanswered(res.code) }, res.code)
             }
             // Some actions answer with no body.
             json.decodeFromString<T>(text.ifBlank { "null" })
         }
     }
+}
+
+/** A failed answer with no message, in words: a gateway error means the hub itself is not running. */
+fun unanswered(code: Int): String = when (code) {
+    502, 503, 504 -> "Your hub is not answering. Check that MACE is running on your computer."
+    401, 403 -> "This phone is no longer signed in to your hub. Link it again."
+    else -> "The hub answered $code."
 }

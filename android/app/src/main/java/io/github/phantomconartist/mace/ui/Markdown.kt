@@ -3,6 +3,7 @@ package io.github.phantomconartist.mace.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,7 +80,7 @@ private fun blocks(source: String): List<Block> {
     return out
 }
 
-private val inline = Regex("""\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)|(?<![\w@])@([A-Za-z][\w.-]*[A-Za-z0-9])""")
+private val inline = Regex("""\[([^\]]+)\]\(([^)\s]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|(?<![*\w])\*([^*\s][^*]*)\*(?!\w)|(?<![_\w])_([^_\s][^_]*)_(?!\w)|(?<![\w@])@([A-Za-z][\w.@-]*[A-Za-z0-9])""")
 
 private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspecified, mentions: Map<String, Color> = emptyMap()): AnnotatedString = buildAnnotatedString {
     var at = 0
@@ -97,7 +97,7 @@ private fun styled(text: String, codeBg: Color, linkColor: Color = Color.Unspeci
         val mention = g[8]
         when {
             // @handle in the color of the agent it names; @all and unknown handles in the link color.
-            mention.isNotEmpty() -> withStyle(SpanStyle(color = mentions[mention.lowercase()] ?: linkColor, fontWeight = FontWeight.SemiBold)) { append("@" + mention) }
+            mention.isNotEmpty() -> withStyle(SpanStyle(color = (mentions[mention.lowercase()] ?: mentions[mention.substringBefore('@').lowercase()]) ?: linkColor, fontWeight = FontWeight.SemiBold)) { append("@" + mention) }
             // Web links open in the browser; file links show their name.
             label.isNotEmpty() && (url.startsWith("http://") || url.startsWith("https://")) ->
                 withLink(androidx.compose.ui.text.LinkAnnotation.Url(url, androidx.compose.ui.text.TextLinkStyles(SpanStyle(color = linkColor, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)))) { append(label) }
@@ -126,22 +126,25 @@ fun Markdown(text: String, color: Color, modifier: Modifier = Modifier, reserve:
         if (!last || reserve.isEmpty()) return s
         return buildAnnotatedString { append(s); withStyle(SpanStyle(color = Color.Transparent, fontSize = 11.sp)) { append(reserve) } }
     }
-    SelectionContainer(modifier) {
+    // Not a SelectionContainer: a long press on a bubble opens its menu, as in
+    // a messenger, and Copy there takes the whole text.
+    val bodyStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 21.sp)
+    Box(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             parsed.forEachIndexed { i, b ->
                 val last = i == parsed.lastIndex
                 when (b) {
-                    is Block.Text -> Text(body(b.text, last), style = MaterialTheme.typography.bodyLarge, color = color)
+                    is Block.Text -> Text(body(b.text, last), style = bodyStyle, color = color)
                     is Block.Heading -> Text(body(b.text, last), style = MaterialTheme.typography.titleMedium, color = color)
                     is Block.Quote -> Text(
                         styled(b.text, codeBg, link, mentions),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = bodyStyle,
                         color = color.copy(alpha = 0.75f),
                         modifier = Modifier.padding(start = 4.dp).background(codeBg, RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                     is Block.Item -> Row {
-                        Text(b.marker, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                        Text(body(b.text, last), style = MaterialTheme.typography.bodyLarge, color = color)
+                        Text(b.marker, style = bodyStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
+                        Text(body(b.text, last), style = bodyStyle, color = color)
                     }
                     is Block.Code -> Text(
                         b.code,

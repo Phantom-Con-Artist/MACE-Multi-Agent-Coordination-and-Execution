@@ -15,8 +15,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -142,6 +145,27 @@ private fun dayLabel(day: LocalDate): String = when {
 }
 
 /** Each run of messages from one sender within a minute shares one tail. */
+private fun isPicture(m: Message) = m.text.isBlank() && m.kind != "failed" && (kindOf(m.file) == FileKind.Image || kindOf(m.file) == FileKind.Video)
+
+/**
+ * Messages as the rows the chat shows: four or more pictures or videos one
+ * sender posts in a row, without captions, become one album, as in a messenger.
+ */
+fun albums(messages: List<Message>): List<List<Message>> {
+    val out = mutableListOf<List<Message>>()
+    var run = mutableListOf<Message>()
+    fun flush() {
+        if (run.size >= 4) out += run.toList() else run.forEach { out += listOf(it) }
+        run = mutableListOf()
+    }
+    for (m in messages) {
+        if (isPicture(m) && run.isNotEmpty() && !startsRun(run.last(), m)) run += m
+        else { flush(); if (isPicture(m)) run += m else out += listOf(m) }
+    }
+    flush()
+    return out
+}
+
 private fun startsRun(prev: Message?, m: Message): Boolean {
     if (prev == null || prev.sender != m.sender || prev.kind == "system" || m.kind == "system" || prev.sender == "mace") return true
     val a = local(prev.at) ?: return true
@@ -251,17 +275,25 @@ fun ChatScreen(
     }
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > 2 } }
     // @handle in a message takes the color of the agent it names.
-    val mentionColors = state.members.filter { it.handle.isNotEmpty() }.associate { it.handle.lowercase() to memberColor(it.id) } + ("all" to MaterialTheme.colorScheme.primary)
+    val handles = roomHandles(state.members.distinctBy { it.id })
+    val mentionColors = state.members.filter { it.handle.isNotEmpty() }.associate { it.handle.lowercase() to memberColor(it.id) } +
+        handles.entries.associate { (id, h) -> h.lowercase() to memberColor(id) } + ("all" to MaterialTheme.colorScheme.primary)
+
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
 
     fun reply(m: Message) {
         val name = if (m.sender == "you") "You" else memberOf(m.sender)?.name ?: "Agent"
         val first = m.text.lineSequence().firstOrNull { it.isNotBlank() && !it.startsWith(">") }.orEmpty()
         quote = Quote(m.sender, name, first.ifEmpty { m.file.trimEnd('/').substringAfterLast('/') }.take(140))
-        val handle = memberOf(m.sender)?.handle
+        val handle = handles[m.sender]
         if (state.group && handle != null && !draft.text.contains("@$handle")) {
             val next = "@$handle " + draft.text
             draft = TextFieldValue(next, TextRange(next.length))
         }
+        // As in a messenger, replying opens the keyboard on the composer.
+        runCatching { focus.requestFocus() }
+        keyboard?.show()
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -334,6 +366,7 @@ fun ChatScreen(
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val messages = state.messages
+                val rows = remember(messages) { albums(messages) }
                 val unread = if (state.firstUnread > 0) messages.count { it.seq >= state.firstUnread && it.sender != "you" } else 0
                 val bubbleMax = (LocalConfiguration.current.screenWidthDp * 0.82f).dp
                 LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(top = 8.dp, bottom = 6.dp)) {
@@ -348,15 +381,17 @@ fun ChatScreen(
                         val who = if (names.size <= 3) names.joinToString(", ") else names.take(2).joinToString(", ") + " and ${names.size - 2} more"
                         item(key = "working-all") { WorkingRow(state.working.keys.first(), who, emptyList(), true, false, note = "are working") }
                     }
-                    for (i in messages.indices.reversed()) {
-                        val m = messages[i]
-                        val prev = messages.getOrNull(i - 1)
-                        item(key = m.id) {
+                    for (r in rows.indices.reversed()) {
+                        val group = rows[r]
+                        val m = group.last()
+                        val prev = rows.getOrNull(r - 1)?.last()
+                        item(key = m.id, contentType = if (group.size > 1) "album" else "message") {
                             Column {
                                 val day = local(m.at)?.toLocalDate()
                                 if (day != null && day != prev?.let { local(it.at)?.toLocalDate() }) DayChip(dayLabel(day))
                                 if (m.seq > 0 && m.seq == state.firstUnread && unread > 0) UnreadMarker(unread)
-                                MessageRow(m, startsRun(prev, m), state, bubbleMax, memberOf, roleOf, media, observe, mentionColors, actions.onOpenFile, onRetry = actions.onRetry, onReply = { reply(m) })
+                                MessageRow(m, startsRun(prev, group.first()), state, bubbleMax, memberOf, roleOf, media, observe, mentionColors, actions.onOpenFile,
+                                    onRetry = actions.onRetry, onReply = { reply(m) }, album = group)
                             }
                         }
                     }
@@ -371,9 +406,9 @@ fun ChatScreen(
                 }
             }
             state.problem?.let {
-                Text(it, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 14.dp, vertical = 8.dp))
+                Text(it, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 12.dp, vertical = 6.dp))
             }
             if (!linked) {
                 Row(
@@ -408,6 +443,7 @@ fun ChatScreen(
                     attachment = ""
                     scope.launch { list.animateScrollToItem(0) }
                 },
+                focus = focus,
             )
         }
     }
@@ -516,6 +552,8 @@ private fun MessageRow(
     onOpenFile: (String) -> Unit,
     onRetry: (Message) -> Unit,
     onReply: () -> Unit,
+    /** Pictures and videos sent in a row, shown together in this one bubble. */
+    album: List<Message> = emptyList(),
 ) {
     if (m.sender == "mace" || m.kind == "system") {
         SystemNote(m.text)
@@ -598,9 +636,13 @@ private fun MessageRow(
                                 }
                             }
                         }
+                        if (m.flair.isNotEmpty() || m.role.isNotEmpty()) Tags(m.flair, m.role, ink)
                         if (observe && m.activity.isNotEmpty()) StepsDisclosure(m.activity, ink)
                         Box {
-                            Body(m, reserve, ink, bubbleMax, media, onOpenFile, mentionColors)
+                            if (album.size > 1) Album(album, ink, bubbleMax, media, onOpenFile)
+                            else Body(m, reserve, ink, bubbleMax, media, onOpenFile, mentionColors) { name ->
+                                if (name == "You") mace.read else state.members.firstOrNull { it.name == name }?.let { memberColor(it.id) } ?: MaterialTheme.colorScheme.primary
+                            }
                             // On a picture without a caption the time sits on a dark scrim.
                             val onPicture = m.text.isBlank() && (kindOf(m.file) == FileKind.Image || kindOf(m.file) == FileKind.Video)
                             val metaInk = if (onPicture) Color.White else ink
@@ -633,18 +675,49 @@ private fun MessageRow(
     }
 }
 
+/** A flair's color: what kind of message it is, at a glance. Custom flairs get a steady color of their own. */
+@Composable
+fun flairColor(flair: String): Color = when (flair) {
+    "done", "approve" -> mace.online
+    "blocker" -> mace.down
+    "plan", "decision" -> mace.signal
+    "question" -> MaterialTheme.colorScheme.tertiary
+    "idea" -> mace.names[1]
+    "redirect" -> mace.names[0]
+    "fyi" -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> memberColor(flair)
+}
+
+/** The message's flair as a #tag chip, and the role the sender took on, as on the desktop. */
+@Composable
+private fun Tags(flair: String, role: String, ink: Color) {
+    Row(Modifier.padding(horizontal = 4.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (flair.isNotEmpty()) {
+            val c = flairColor(flair)
+            Text("#$flair", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = c, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(c.copy(alpha = 0.16f)).padding(horizontal = 7.dp, vertical = 2.dp))
+        }
+        if (role.isNotEmpty()) {
+            Text("took on: $role", style = MaterialTheme.typography.labelMedium, color = ink.copy(alpha = 0.75f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(ink.copy(alpha = 0.08f)).padding(horizontal = 7.dp, vertical = 2.dp))
+        }
+    }
+}
+
 /** A quoted reply ("> Name: text" on the first line) shows as a quote card, as in a messenger. */
 private val quoteLine = Regex("""^> ([^:\n]{1,80}): (.*)$""")
 
 @Composable
-private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit, mentionColors: Map<String, Color>) = Column {
+private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit, mentionColors: Map<String, Color>, quoteColor: @Composable (String) -> Color) = Column {
     var text = m.text
     quoteLine.find(text.lineSequence().firstOrNull().orEmpty())?.let { q ->
         text = text.substringAfter('\n', "")
         Row(Modifier.padding(bottom = 4.dp).height(IntrinsicSize.Min).clip(RoundedCornerShape(8.dp)).background(ink.copy(alpha = 0.08f))) {
-            Box(Modifier.width(4.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+            // The quoted person's own color, as in a messenger group.
+            val who = quoteColor(q.groupValues[1])
+            Box(Modifier.width(4.dp).fillMaxHeight().background(who))
             Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
-                Text(q.groupValues[1], style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(q.groupValues[1], style = MaterialTheme.typography.labelLarge, color = who, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(q.groupValues[2], style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.75f), maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -654,6 +727,31 @@ private fun Body(m: Message, reserve: String, ink: Color, width: Dp, media: Medi
     if (captioned) Box(Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) { Markdown(text, ink, reserve = reserve, mentions = mentionColors) }
     else if (kindOf(m.file) == FileKind.Other || kindOf(m.file) == FileKind.Folder) {
         Text(buildAnnotatedString { withStyle(SpanStyle(color = Color.Transparent, fontSize = 11.sp)) { append(reserve) } }, modifier = Modifier.padding(horizontal = 4.dp))
+    }
+}
+
+/** An album: a 2 by 2 grid, the fourth tile counting the rest; tapping the count shows them all. */
+@Composable
+private fun Album(items: List<Message>, ink: Color, width: Dp, media: MediaLoader, onOpenFile: (String) -> Unit) {
+    var all by remember(items.first().id) { mutableStateOf(false) }
+    val tile = (width - 20.dp - 4.dp) / 2
+    val shown = if (all) items else items.take(4)
+    Column(Modifier.padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        shown.chunked(2).forEachIndexed { row, pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                pair.forEachIndexed { col, it ->
+                    val more = !all && row == 1 && col == 1 && items.size > 4
+                    Box(Modifier.size(tile).clip(RoundedCornerShape(6.dp))) {
+                        Thumb(it.file, ink, media, Modifier.fillMaxSize()) { if (more) all = true else onOpenFile(it.file) }
+                        if (more) {
+                            Box(Modifier.fillMaxSize().background(Color(0x8C000000)).clickable { all = true }, contentAlignment = Alignment.Center) {
+                                Text("+${items.size - 3}", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
