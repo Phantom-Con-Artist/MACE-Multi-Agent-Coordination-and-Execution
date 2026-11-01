@@ -322,7 +322,7 @@ func (h *APIHandler) statusApply(ctx context.Context, a statusAction) error {
 	if _, err := h.postMessage(ctx, &m); err != nil {
 		return err
 	}
-	h.commandNote(s.Room, fmt.Sprintf("%s offered help on status %s. You can read their side chat.", h.memberName(ctx, offerer), s.ID), false)
+	h.commandNote(s.Room, fmt.Sprintf("%s offered help on status %s. You can read their side chat.", h.agentName(ctx, offerer), s.ID), false)
 	return h.dispatch(ctx, side.ID, m)
 }
 
