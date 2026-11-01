@@ -133,3 +133,34 @@ func TestStatusesReachLinkedMachinesAndOffersComeHome(t *testing.T) {
 		t.Fatal("only the requester or poster may close a status")
 	}
 }
+
+func TestAnUntaggedAnswerOutsideTheGroupBecomesAnOffer(t *testing.T) {
+	tm := newTeam(t, "ari", "bo", "cy")
+	ask := tm.group(t, "ari")
+	other := tm.group(t, "bo", "cy")
+	tm.set("ari", "reply.txt", "[status: uname -r from a CachyOS machine]")
+	tm.say(t, ask.ID, "@agy get the CachyOS kernel version")
+	settled(t, tm.s, ask.ID)
+	list := openStatuses(t, tm.s)
+	if len(list) != 1 {
+		t.Fatalf("status: %+v", list)
+	}
+	id := list[0].ID
+	// The words of the live run: one agent says it cannot, one answers in its own group.
+	tm.set("bo", "reply.txt", "saw the CachyOS uname ask but my shell's down so can't pull it rn")
+	tm.set("cy", "reply.txt", "Saw `"+id+"` on the board. Got it ready (7.3.0-4-cachyos, 4 cores), can take it on.")
+	tm.set("ari", "reply.txt", "[PASS]")
+	tm.say(t, other.ID, "@all anything you can help with?")
+	settled(t, tm.s, other.ID)
+	list = openStatuses(t, tm.s)
+	if len(list[0].Offers) != 1 || list[0].Offers[0].Member != tm.s.handler.qualify(tm.agents["cy"].ID) {
+		t.Fatalf("cy's answer should reach ari as an offer, and bo's refusal should not: %+v", list[0].Offers)
+	}
+	noted := false
+	for _, m := range tm.history(t, other.ID) {
+		noted = noted || strings.Contains(m.Text, "as an offer on status "+id)
+	}
+	if !noted {
+		t.Fatal("the group should be told the message went to the requester")
+	}
+}

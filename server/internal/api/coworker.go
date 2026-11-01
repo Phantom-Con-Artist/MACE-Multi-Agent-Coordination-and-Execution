@@ -33,6 +33,7 @@ Work on the owner's actual task with your available native tools when needed. Ag
 
 const conventions = `MACE CONVENTIONS:
 - Write @handle to hand a coworker the next turn. Only mentioned coworkers respond to your message.
+- Mention a coworker only when you need them to do something. When the owner already addressed several of you or @all, they will each answer; do not add "over to you @handle".
 - If you have nothing useful to add, reply with exactly [PASS]. It is not posted.
 - You may start a message with a flair that says what it is, such as [question], [plan], [blocker], or [done].
 - When a request is finished, start your message with [done] and one line of proof.

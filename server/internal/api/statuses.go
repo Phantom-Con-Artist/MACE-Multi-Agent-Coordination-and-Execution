@@ -38,6 +38,11 @@ var (
 	offerPattern      = regexp.MustCompile(`(?i)\[offer\s+(s[0-9a-f]{4,12})\]\s*`)
 	statusPickPattern = regexp.MustCompile(`(?i)\[status\s+pick\s+@([A-Za-z0-9][A-Za-z0-9._@-]*[A-Za-z0-9])\]`)
 	statusDonePattern = regexp.MustCompile(`(?i)\[status\s+done\]`)
+	// An agent that names an open status and says it can help, without the
+	// [offer] tag, is offering; one that says it cannot is not.
+	statusIDPattern = regexp.MustCompile(`\bs[0-9a-f]{6}\b`)
+	offerWords      = regexp.MustCompile(`(?i)\b(i have|i've got|i got|got it|have it|can (take|do|help|run|share|give|send|provide|grab)|i'll (take|do|run|send|share|grab)|here(?:'s| is| are)|ready|on it)\b`)
+	refusalWords    = regexp.MustCompile(`(?i)\b(can't|cannot|can not|unable|don't have|do not have|no access|not able|isn't|is down|shell's down)\b`)
 )
 
 // Status is one request on the board. Member IDs are qualified with the
@@ -317,7 +322,7 @@ func (h *APIHandler) statusApply(ctx context.Context, a statusAction) error {
 	if _, err := h.postMessage(ctx, &m); err != nil {
 		return err
 	}
-	h.commandNote(s.Room, fmt.Sprintf("%s offered help on status %s. You can read their side chat.", h.memberName(ctx, offerer), s.ID), true)
+	h.commandNote(s.Room, fmt.Sprintf("%s offered help on status %s. You can read their side chat.", h.memberName(ctx, offerer), s.ID), false)
 	return h.dispatch(ctx, side.ID, m)
 }
 
@@ -332,12 +337,12 @@ func (h *APIHandler) statusClose(ctx context.Context, s Status, pick string) {
 			picked = o.Name
 			continue
 		}
-		h.commandNote(o.Room, fmt.Sprintf("Status %s is sorted, thanks for offering.", s.ID), true)
+		h.commandNote(o.Room, fmt.Sprintf("Status %s is sorted, thanks for offering.", s.ID), false)
 	}
 	if picked != "" {
-		h.commandNote(s.Room, fmt.Sprintf("Status %s is sorted: %s went with %s.", s.ID, s.ForName, picked), true)
+		h.commandNote(s.Room, fmt.Sprintf("Status %s is sorted: %s went with %s.", s.ID, s.ForName, picked), false)
 	} else {
-		h.commandNote(s.Room, fmt.Sprintf("Status %s is closed.", s.ID), true)
+		h.commandNote(s.Room, fmt.Sprintf("Status %s is closed.", s.ID), false)
 	}
 }
 
@@ -349,10 +354,11 @@ func (h *APIHandler) statusTags(ctx context.Context, room string, group *Room, p
 	if m := offerPattern.FindStringSubmatch(text); m != nil {
 		rest := strings.TrimSpace(strings.Replace(text, m[0], "", 1))
 		if err := h.statusAct(ctx, statusAction{Status: strings.ToLower(m[1]), Member: h.qualify(member), Text: rest}); err != nil {
-			h.commandNote(room, h.memberName(ctx, member)+" could not offer: "+err.Error(), true)
+			h.commandNote(room, h.memberName(ctx, member)+" could not offer: "+err.Error(), false)
 		}
 		return "", "", true
 	}
+	h.untaggedOffer(ctx, room, member, text)
 	if m := statusPickPattern.FindStringSubmatch(text); m != nil {
 		text = strings.TrimSpace(strings.Replace(text, m[0], "", 1))
 		h.statusPick(ctx, room, member, m[1])
@@ -361,7 +367,7 @@ func (h *APIHandler) statusTags(ctx context.Context, room string, group *Room, p
 		for _, s := range h.statusList(ctx) {
 			if s.open(time.Now()) && s.For == h.qualify(member) {
 				if err := h.statusAct(ctx, statusAction{Status: s.ID, Member: s.For, Close: true}); err != nil {
-					h.commandNote(room, err.Error(), true)
+					h.commandNote(room, err.Error(), false)
 				}
 			}
 		}
@@ -373,7 +379,7 @@ func (h *APIHandler) statusTags(ctx context.Context, room string, group *Room, p
 	need := strings.TrimSpace(text[m[2]:m[3]])
 	text = strings.TrimSpace(text[:m[0]] + text[m[1]:])
 	if p.Mode == "team" && p.Lead != "" && member != p.Lead {
-		h.commandNote(room, h.memberName(ctx, member)+" tried to post a status; in a team only the lead posts them. Ask @lead.", true)
+		h.commandNote(room, h.memberName(ctx, member)+" tried to post a status; in a team only the lead posts them. Ask @lead.", false)
 		return text, flair, false
 	}
 	forID := member
@@ -387,7 +393,7 @@ func (h *APIHandler) statusTags(ctx context.Context, room string, group *Room, p
 		need = strings.TrimSpace(need[:f[0]])
 	}
 	if err := h.statusPost(ctx, group, member, forID, need); err != nil {
-		h.commandNote(room, "Status not posted: "+err.Error(), true)
+		h.commandNote(room, "Status not posted: "+err.Error(), false)
 		return text, flair, false
 	}
 	if text == "" {
@@ -409,13 +415,13 @@ func (h *APIHandler) statusPick(ctx context.Context, room, member, handle string
 			hd := strings.ToLower(h.memberHandle(ctx, h.localize(o.Member)))
 			if hd == handle || hd == base {
 				if err := h.statusAct(ctx, statusAction{Status: s.ID, Member: h.qualify(member), Pick: o.Member}); err != nil {
-					h.commandNote(room, err.Error(), true)
+					h.commandNote(room, err.Error(), false)
 				}
 				return
 			}
 		}
 	}
-	h.commandNote(room, "No offer from @"+handle+" on an open status of yours.", true)
+	h.commandNote(room, "No offer from @"+handle+" on an open status of yours.", false)
 }
 
 // statusPost records a new status for an agent, replacing its older one.
@@ -485,7 +491,7 @@ func (h *APIHandler) statusBoard(ctx context.Context, s Session) string {
 		fmt.Fprintf(&b, "- %s: %s on %s needs %s (group %q, %s ago, %d offers)\n", st.ID, st.ForName, st.Machine, st.Text, limited(st.RoomName, 60), ago(now.Sub(st.At)), len(st.Offers))
 	}
 	if others > 0 {
-		b.WriteString("To offer, start a message with [offer <id>] and say what you have. It opens a side chat with them.\n")
+		b.WriteString("The agent who asked is usually not in your conversations and cannot see them: only a message that starts with [offer <id>] reaches it, as a side chat with it. Answering anywhere else is lost. Offer only what you can actually provide; if you cannot help, say nothing about it.\n")
 	}
 	return b.String()
 }
@@ -521,4 +527,30 @@ func (h *APIHandler) closeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// untaggedOffer is the safety net for an agent that answers a status in its
+// own conversation instead of with [offer <id>]: if the reply names an open
+// status, sounds like an offer and not a refusal, and the agent is not in the
+// requester's group (where the requester would see it anyway), the reply is
+// also sent as an offer, and the conversation is told so.
+func (h *APIHandler) untaggedOffer(ctx context.Context, room, member, text string) {
+	if offerPattern.MatchString(text) || !offerWords.MatchString(text) || refusalWords.MatchString(text) {
+		return
+	}
+	self := h.qualify(member)
+	for _, id := range statusIDPattern.FindAllString(text, 3) {
+		st, ok := h.statusGet(ctx, id)
+		if !ok || !st.open(time.Now()) || st.For == self || st.Poster == self {
+			continue
+		}
+		var group Room
+		if st.Home == h.selfID() && h.store.Document(ctx, "room", st.Room, &group) == nil && slices.Contains(group.Members, member) {
+			continue
+		}
+		if err := h.statusAct(ctx, statusAction{Status: st.ID, Member: self, Text: text}); err == nil {
+			h.commandNote(room, fmt.Sprintf("Mace sent %s's message to %s as an offer on status %s, since they cannot see this chat.", h.memberName(ctx, member), st.ForName, st.ID), false)
+		}
+		return
+	}
 }
