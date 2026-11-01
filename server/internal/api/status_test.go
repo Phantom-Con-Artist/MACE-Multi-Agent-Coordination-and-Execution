@@ -69,6 +69,19 @@ func TestStatusOfferAndPick(t *testing.T) {
 	if len(list) != 1 || !list[0].Closed || list[0].Picked != tm.s.handler.qualify(tm.agents["bo"].ID) {
 		t.Fatalf("the pick should close the status with bo picked: %+v", list)
 	}
+	settled(t, tm.s, room.ID)
+	woken := false
+	for _, m := range tm.history(t, room.ID) {
+		woken = woken || m.Sender == "mace" && strings.Contains(m.Text, "carry on with the task here")
+	}
+	for _, m := range tm.history(t, room.ID) {
+		if strings.Contains(m.Text, "No offer from") {
+			t.Fatal("repeating a pick after the status closed should not leave a note")
+		}
+	}
+	if !woken || strings.Count(tm.promptsOf(t, "ari"), "carry on with the task here") == 0 {
+		t.Fatal("after the pick, the requester should be woken in its group to finish the task")
+	}
 	if p := tm.promptsOf(t, "cy"); strings.Count(p, "STATUS BOARD") > 1 {
 		t.Fatal("a closed status should leave the board")
 	}

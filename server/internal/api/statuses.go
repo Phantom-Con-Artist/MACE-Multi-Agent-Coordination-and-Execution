@@ -316,7 +316,7 @@ func (h *APIHandler) statusApply(ctx context.Context, a statusAction) error {
 	if text == "" {
 		text = "I can help with this."
 	}
-	s.Offers = append(s.Offers, StatusOffer{Member: a.Member, Name: h.memberName(ctx, offerer), Machine: h.machineOf(ctx, a.Member), Text: limited(text, 280), Room: side.ID, At: time.Now().UTC()})
+	s.Offers = append(s.Offers, StatusOffer{Member: a.Member, Name: h.agentName(ctx, offerer), Machine: h.machineOf(ctx, a.Member), Text: limited(text, 280), Room: side.ID, At: time.Now().UTC()})
 	h.statusSave(ctx, s)
 	m := Message{ID: newID(), Room: side.ID, Sender: offerer, Text: fmt.Sprintf("Offer for your status %s (%s):\n%s", s.ID, limited(s.Text, 200), text), Flair: "offer", At: time.Now().UTC(), Delivery: map[string]string{}, Mentions: []string{requester}, Hop: 1}
 	if _, err := h.postMessage(ctx, &m); err != nil {
@@ -340,7 +340,20 @@ func (h *APIHandler) statusClose(ctx context.Context, s Status, pick string) {
 		h.commandNote(o.Room, fmt.Sprintf("Status %s is sorted, thanks for offering.", s.ID), false)
 	}
 	if picked != "" {
-		h.commandNote(s.Room, fmt.Sprintf("Status %s is sorted: %s went with %s.", s.ID, s.ForName, picked), false)
+		// Hand the work back: the requester carries on in its own group with
+		// what it got, so the owner sees the result where they asked.
+		requester := h.localize(s.For)
+		var group Room
+		if h.store.Document(ctx, "room", s.Room, &group) == nil && !group.Removed && slices.Contains(group.Members, requester) {
+			handle := h.roomHandles(ctx, group.Members)[requester]
+			m := Message{ID: newID(), Room: s.Room, Sender: "mace", Kind: "system", Wake: true, Mentions: []string{requester}, At: time.Now().UTC(), Delivery: map[string]string{},
+				Text: fmt.Sprintf("Status %s is sorted: %s went with %s. @%s, carry on with the task here using what they gave you in the side chat.", s.ID, s.ForName, picked, handle)}
+			if _, err := h.postMessage(ctx, &m); err == nil {
+				h.dispatch(ctx, s.Room, m)
+			}
+		} else {
+			h.commandNote(s.Room, fmt.Sprintf("Status %s is sorted: %s went with %s.", s.ID, s.ForName, picked), false)
+		}
 	} else {
 		h.commandNote(s.Room, fmt.Sprintf("Status %s is closed.", s.ID), false)
 	}
@@ -421,7 +434,13 @@ func (h *APIHandler) statusPick(ctx context.Context, room, member, handle string
 			}
 		}
 	}
-	h.commandNote(room, "No offer from @"+handle+" on an open status of yours.", false)
+	// A pick repeated after the status closed is not worth a note.
+	for _, s := range h.statusList(ctx) {
+		if s.open(time.Now()) && (s.For == h.qualify(member) || s.Poster == h.qualify(member)) {
+			h.commandNote(room, "No offer from @"+handle+" on your status "+s.ID+".", false)
+			return
+		}
+	}
 }
 
 // statusPost records a new status for an agent, replacing its older one.
@@ -449,7 +468,7 @@ func (h *APIHandler) statusPost(ctx context.Context, group *Room, poster, forID,
 	}
 	s := Status{
 		ID: newStatusID(), Home: h.selfID(), Text: limited(need, 280),
-		For: h.qualify(forID), ForName: h.memberName(ctx, forID), Machine: h.machineOf(ctx, h.qualify(forID)),
+		For: h.qualify(forID), ForName: h.agentName(ctx, forID), Machine: h.machineOf(ctx, h.qualify(forID)),
 		Poster: h.qualify(poster), Room: group.ID, RoomName: group.Name,
 		At: now, Expires: now.Add(statusLife),
 	}
@@ -553,4 +572,14 @@ func (h *APIHandler) untaggedOffer(ctx context.Context, room, member, text strin
 		}
 		return
 	}
+}
+
+// agentName is an agent's own name, without the "machine / " prefix the hub
+// keeps on agents of other machines; the machine is shown on its own.
+func (h *APIHandler) agentName(ctx context.Context, id string) string {
+	name := h.memberName(ctx, id)
+	if _, after, ok := strings.Cut(name, " / "); ok && strings.Contains(id, "::") {
+		return after
+	}
+	return name
 }
