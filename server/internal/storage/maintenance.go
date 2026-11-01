@@ -23,6 +23,10 @@ func (s *Store) Backup(label string) (string, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}
+	if s.global != s.db {
+		// With sessions, each snapshot names the session it is of.
+		label += "-" + strings.TrimSuffix(filepath.Base(s.sessionPath), ".db")
+	}
 	path := filepath.Join(dir, fmt.Sprintf("mace-%s-%s.db", time.Now().UTC().Format("20060102T150405"), label))
 	if _, err := s.db.Exec(`VACUUM INTO ?`, path); err != nil {
 		return "", err

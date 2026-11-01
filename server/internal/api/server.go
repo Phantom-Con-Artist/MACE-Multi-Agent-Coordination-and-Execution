@@ -36,6 +36,10 @@ type Config struct {
 	AuthSecret string
 	NodeInfo   protocol.NodeInfo
 	Listener   net.Listener // Optional custom listener (e.g. tsnet)
+	// DataDir holds the session databases; Restart restarts the daemon into
+	// the newly chosen session. Both are unset in tests.
+	DataDir string
+	Restart func()
 }
 
 // NewServer builds and mounts all REST and WebSocket routes on chi router.
@@ -70,6 +74,7 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 
 	handler := NewAPIHandler(supervisor, store, cfg.NodeInfo)
 	handler.port = cfg.Port
+	handler.dataDir, handler.restart = cfg.DataDir, cfg.Restart
 	handler.fileRoot = os.Getenv("MACE_FILE_ROOT")
 	if handler.fileRoot == "" {
 		handler.fileRoot = "/"
@@ -182,6 +187,11 @@ func NewServer(cfg Config, supervisor *agent.Supervisor, store *storage.Store) *
 		r.Post("/node/status", handler.nodeStatus)
 		r.Get("/node/statuses", handler.nodeStatuses)
 		r.Post("/node/status-action", handler.nodeStatusAction)
+		r.Get("/workspaces", handler.workspaces)
+		r.Post("/workspaces", handler.workspaces)
+		r.Post("/workspaces/{id}/switch", handler.switchWorkspace)
+		r.Post("/workspaces/{id}/remove", handler.removeWorkspace)
+		r.Post("/node/workspace", handler.nodeWorkspace)
 		r.Get("/statuses", handler.statuses)
 		r.Post("/statuses/{id}/close", handler.closeStatus)
 		r.Get("/records/{conversation}", handler.conversationRecords)

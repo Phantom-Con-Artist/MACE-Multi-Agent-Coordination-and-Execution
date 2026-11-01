@@ -72,6 +72,9 @@ type joinInvite struct {
 type nodePong struct {
 	Node  Node   `json:"node"`
 	Nodes []Node `json:"nodes"`
+	// Workspace is the session the machine runs, so linked machines settle
+	// on the one chosen last.
+	Workspace *workspaceSwitch `json:"workspace,omitempty"`
 }
 
 type nodeState struct {
@@ -81,6 +84,9 @@ type nodeState struct {
 	// asked is when the check behind each node's current state started, so a
 	// slow, older check never overwrites a newer result.
 	asked map[string]time.Time
+	// session is the session each node last reported; history and statuses
+	// only move between machines that run the same one.
+	session map[string]string
 }
 
 const (
@@ -398,7 +404,7 @@ func (h *APIHandler) ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.markNode(from.ID, "", time.Now())
-	writeJSON(w, 200, nodePong{Node: h.selfNode(), Nodes: h.knownNodes(r.Context())})
+	writeJSON(w, 200, nodePong{Node: h.selfNode(), Nodes: h.knownNodes(r.Context()), Workspace: h.currentWorkspace(r.Context())})
 }
 
 // removeNode serves POST /api/v1/nodes/{id}/remove. The node is remembered as
@@ -462,10 +468,37 @@ func (h *APIHandler) checkNode(ctx context.Context, n Node, attempt int) {
 		h.store.PutDocument(ctx, "node", n.ID, n)
 	}
 	h.learnNodes(ctx, pong.Nodes, n.ID)
+	theirs := ""
+	if pong.Workspace != nil {
+		theirs = pong.Workspace.ID
+		h.followWorkspace(ctx, *pong.Workspace)
+	}
+	h.nodeHealth.mu.Lock()
+	if h.nodeHealth.session == nil {
+		h.nodeHealth.session = map[string]string{}
+	}
+	h.nodeHealth.session[n.ID] = theirs
+	h.nodeHealth.mu.Unlock()
+	if !h.sameSession(n.ID) {
+		return // It is switching sessions; nothing may cross until it has.
+	}
 	if _, err := h.syncFrom(ctx, n); err != nil {
 		log.Printf("[MACE] Sync from %s: %v", n.Name, err)
 	}
 	h.statusPull(ctx, n)
+}
+
+// sameSession reports whether a node last reported the session this machine
+// runs. Machines without sessions report none and always match.
+func (h *APIHandler) sameSession(node string) bool {
+	mine := h.currentWorkspace(context.Background())
+	if mine == nil {
+		return true
+	}
+	h.nodeHealth.mu.Lock()
+	theirs, known := h.nodeHealth.session[node]
+	h.nodeHealth.mu.Unlock()
+	return known && (theirs == "" || theirs == mine.ID)
 }
 
 func (h *APIHandler) watchNodes(ctx context.Context) {

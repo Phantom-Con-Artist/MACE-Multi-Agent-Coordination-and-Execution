@@ -15,8 +15,13 @@ import (
 
 // Store provides persistence for MACE agents, execution events, and audit logs.
 type Store struct {
-	db   *sql.DB
-	path string
+	db *sql.DB
+	// global holds what every session shares (see workspaces.go); it is db
+	// itself when the store has no sessions, as in tests.
+	global *sql.DB
+	path   string
+	// sessionPath is the database file of the open session.
+	sessionPath string
 	// Recovered describes an automatic restore after corruption, if one happened.
 	Recovered string
 }
@@ -41,7 +46,7 @@ func Open(dbPath string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	store := &Store{db: db, path: dbPath}
+	store := &Store{db: db, global: db, path: dbPath, sessionPath: dbPath}
 	if dbPath != ":memory:" {
 		if ok, detail := store.healthy(); !ok {
 			db.Close()
@@ -67,6 +72,9 @@ func Open(dbPath string) (*Store, error) {
 
 // Close closes the underlying SQLite database connection.
 func (s *Store) Close() error {
+	if s.global != nil && s.global != s.db {
+		s.global.Close()
+	}
 	return s.db.Close()
 }
 
@@ -410,6 +418,6 @@ func (s *Store) AppendAudit(ctx context.Context, actor, action, targetID string,
 	INSERT INTO audit_log (actor, action, target_id, details_json, timestamp)
 	VALUES (?, ?, ?, ?, ?);
 	`
-	_, err := s.db.ExecContext(ctx, query, actor, action, targetID, string(detailsJSON), time.Now().UTC())
+	_, err := s.global.ExecContext(ctx, query, actor, action, targetID, string(detailsJSON), time.Now().UTC())
 	return err
 }

@@ -55,6 +55,9 @@ func main() {
 		}
 		*authSecretFlag = strings.TrimSpace(string(b))
 	}
+	// A restart into another session needs the environment this daemon was
+	// started with, before the credentials below are taken out of it.
+	startEnv := os.Environ()
 	// Children are launched with a filtered environment, but nothing else in this
 	// process should hand credentials on either.
 	for _, key := range []string{"MACE_AUTH_SECRET", "MACE_AUTH_SECRET_FILE", "MACE_TS_AUTHKEY"} {
@@ -77,12 +80,13 @@ func main() {
 	}
 
 	// 1. Initialize SQLite Store
-	store, err := storage.Open(*dbFlag)
+	// Each session has its own database; global.db holds what they share.
+	store, session, err := storage.OpenWorkspaces(dataDir, filepath.Base(*dbFlag))
 	if err != nil {
 		log.Fatalf("[MACE] Failed to open database: %v", err)
 	}
 	defer store.Close()
-	log.Printf("[MACE] Database initialized at %s", *dbFlag)
+	log.Printf("[MACE] Database initialized at %s (session %q)", store.SessionPath(), session.Name)
 	if store.Recovered != "" {
 		log.Printf("[MACE] WARNING: %s", store.Recovered)
 		_ = store.AppendAudit(context.Background(), "storage", "DATABASE_RECOVERED", "", map[string]any{"details": store.Recovered})
@@ -140,12 +144,22 @@ func main() {
 		StartedAt: time.Now().UTC(),
 	}
 
+	// Switching sessions restarts the daemon in place, so nothing held in
+	// memory (queues, runs, live agents) carries over to the next session.
+	restartCh := make(chan struct{}, 1)
 	apiServer := api.NewServer(api.Config{
 		Host:       *hostFlag,
 		Port:       *portFlag,
 		AuthSecret: *authSecretFlag,
 		NodeInfo:   nodeInfo,
 		Listener:   listener,
+		DataDir:    dataDir,
+		Restart: func() {
+			select {
+			case restartCh <- struct{}{}:
+			default:
+			}
+		},
 	}, agentSupervisor, store)
 
 	go maintain(ctx, store, time.Duration(getEnvInt("MACE_EVENT_RETENTION_DAYS", 14))*24*time.Hour)
@@ -178,9 +192,14 @@ func main() {
 	hupCh := make(chan os.Signal, 1)
 	signal.Notify(hupCh, syscall.SIGHUP)
 
+	restart := false
 wait:
 	for {
 		select {
+		case <-restartCh:
+			log.Printf("[MACE] Switching sessions: restarting...")
+			restart = true
+			break wait
 		case <-hupCh:
 			log.Printf("[MACE] Ignored a hangup signal; the terminal that started MACE may have closed. Use mace stop to stop.")
 		case sig := <-sigCh:
@@ -196,6 +215,16 @@ wait:
 	cancel()
 	group.Stop(5 * time.Second)
 	_ = agentSupervisor.Close()
+	if restart {
+		listener.Close()
+		tsNode.Close()
+		store.Close()
+		exe, err := os.Executable()
+		if err == nil {
+			err = syscall.Exec(exe, os.Args, startEnv)
+		}
+		log.Fatalf("[MACE] Could not restart for the new session: %v", err)
+	}
 	log.Printf("[MACE] Daemon terminated cleanly.")
 }
 

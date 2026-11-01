@@ -211,7 +211,7 @@ func short(id string) string {
 func (h *APIHandler) syncAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, n := range h.knownNodes(ctx) {
-		if !h.nodeAvailable(n.ID) {
+		if !h.nodeAvailable(n.ID) || !h.sameSession(n.ID) {
 			continue
 		}
 		wg.Add(1)

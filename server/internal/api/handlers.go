@@ -41,6 +41,10 @@ type APIHandler struct {
 	sessionDocMu sync.Mutex
 	// statusMu guards status documents; statusActMu runs one offer, pick,
 	// or close at a time on a status's home machine.
+	// dataDir holds the session databases; restart moves the daemon into a
+	// newly chosen session (see workspaces.go).
+	dataDir     string
+	restart     func()
 	statusMu    sync.Mutex
 	statusActMu sync.Mutex
 	// turnLocks lets one native turn run per agent; local inbox turns and

@@ -35,6 +35,11 @@ class Session(context: Context) {
         if (seq > (seenPrefs.getLong(room, 0))) seenPrefs.edit().putLong(room, seq).apply()
     }
 
+    /** The hub session this phone's saved chats belong to. */
+    var workspace: String?
+        get() = prefs.getString("workspace", null)
+        set(v) = prefs.edit().putString("workspace", v).apply()
+
     private val statusPrefs = context.getSharedPreferences("statuses", Context.MODE_PRIVATE)
 
     /** Statuses the owner has opened, so the Status tab knows what is new. */

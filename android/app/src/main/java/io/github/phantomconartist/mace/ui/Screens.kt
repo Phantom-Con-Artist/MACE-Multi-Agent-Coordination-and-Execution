@@ -109,6 +109,7 @@ class HomeActions(
     val onSignOut: () -> Unit,
     val onLinked: () -> Unit,
     val onLink: () -> Unit,
+    val onSessions: () -> Unit = {},
 )
 
 /** Shown on saved chats while the phone is not linked to a hub. */
@@ -274,7 +275,7 @@ fun HomeScreen(
                 Tab.Status -> StatusTab(statuses, model) { list, i -> viewing = list to i }
                 Tab.Agents -> AgentsTab(agents, model, actions)
                 Tab.Machines -> MachinesTab(model)
-                Tab.Settings -> SettingsTab(state.hub, model, actions.onSignOut, actions.onLinked, actions.onLink)
+                Tab.Settings -> SettingsTab(state.hub, model, actions.onSignOut, actions.onLinked, actions.onLink, actions.onSessions)
             }
         }
     }

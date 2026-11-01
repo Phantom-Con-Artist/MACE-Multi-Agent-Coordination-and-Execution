@@ -157,6 +157,66 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         _chat.update { it?.copy(insert = "> ${st.forName}: ${st.text}\n") }
     }
 
+    private val _workspaces = MutableStateFlow<List<io.github.phantomconartist.mace.data.Workspace>>(emptyList())
+    /** The hub's sessions, the current one marked. */
+    val workspaces: StateFlow<List<io.github.phantomconartist.mace.data.Workspace>> = _workspaces
+
+    private suspend fun loadWorkspaces() {
+        runCatching { hub().workspaces() }.onSuccess { list ->
+            val current = list.firstOrNull { it.current }?.id
+            // Another device switched sessions: nothing saved from the old one may show.
+            if (current != null && session.workspace != null && session.workspace != current) forgetSession()
+            if (current != null) session.workspace = current
+            _workspaces.value = list
+        }
+    }
+
+    /** Clears everything this phone holds from the session it showed, so nothing leaks into the next. */
+    private fun forgetSession() {
+        cache.clear()
+        members = emptyMap()
+        groups = emptyMap()
+        remoteSeen = emptyList()
+        inboxSeen = emptyList()
+        working = emptyMap()
+        _rooms.value = emptyMap()
+        _agents.value = emptyList()
+        _statuses.value = emptyList()
+        _chat.value = null
+        _screen.update { (it as? Screen.Home)?.copy(conversations = emptyList(), loading = true) ?: it }
+    }
+
+    /** Starts a new, empty session on the hub and every linked machine. */
+    fun newSession(name: String) = changeSession(name) { newWorkspace(name).id }
+
+    /** Switches to a saved session. */
+    fun switchSession(id: String, name: String) = changeSession(name) { switchWorkspace(id); id }
+
+    fun removeSession(id: String) = act("Session removed.", then = { viewModelScope.launch { loadWorkspaces() } }) { removeWorkspace(id) }
+
+    private fun changeSession(name: String, call: suspend Hub.() -> String) {
+        viewModelScope.launch {
+            try {
+                val id = hub().call()
+                forgetSession()
+                session.workspace = id
+                _notice.value = "Starting session $name…"
+                // The hub restarts into the session; its event stream reconnects by itself.
+                repeat(15) {
+                    kotlinx.coroutines.delay(1500)
+                    if (runCatching { hub().workspaces() }.getOrNull()?.firstOrNull { it.current }?.id == id) {
+                        loadWorkspaces()
+                        refresh()
+                        return@launch
+                    }
+                }
+                _notice.value = "The hub has not come back yet. Pull to refresh in a moment."
+            } catch (e: IOException) {
+                _notice.value = explain(e)
+            }
+        }
+    }
+
     private fun upsertStatus(st: io.github.phantomconartist.mace.data.AgentStatus) {
         val known = _statuses.value.any { it.id == st.id }
         _statuses.value = (listOf(st) + _statuses.value.filter { it.id != st.id }).sortedByDescending { it.at }
@@ -301,6 +361,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 loadDirectory(remote = false)
                 loadInbox()
                 loadStatuses()
+                loadWorkspaces()
                 // Agents on other machines fill in afterwards; an offline
                 // machine must not hold up the list.
                 launch { runCatching { loadDirectory(remote = true); loadInbox() } }
@@ -762,6 +823,14 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                 _chat.update { c -> if (c == null || c.id != room) c else c.copy(receipts = c.receipts + (member to seq)) }
             }
             "room", "session" -> refreshSoon(directory = true)
+            "workspace" -> {
+                val id = e.data["id"]?.jsonPrimitive?.contentOrNullSafe()
+                if (id != null && id != session.workspace) {
+                    forgetSession()
+                    session.workspace = id
+                    viewModelScope.launch { kotlinx.coroutines.delay(3000); refresh() }
+                }
+            }
             "status" -> runCatching { json.decodeFromJsonElement(io.github.phantomconartist.mace.data.AgentStatus.serializer(), e.data) }.getOrNull()?.let(::upsertStatus)
             "run" -> {
                 val id = e.data["id"]?.jsonPrimitive?.contentOrNullSafe()

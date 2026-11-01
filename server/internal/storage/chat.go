@@ -11,11 +11,11 @@ func (s *Store) PutDocument(ctx context.Context, kind, id string, value any) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO documents(kind,id,data) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data`, kind, id, string(b))
+	_, err = s.docs(kind).ExecContext(ctx, `INSERT INTO documents(kind,id,data) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data`, kind, id, string(b))
 	return err
 }
 func (s *Store) Documents(ctx context.Context, kind string) ([]json.RawMessage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT data FROM documents WHERE kind=? ORDER BY rowid`, kind)
+	rows, err := s.docs(kind).QueryContext(ctx, `SELECT data FROM documents WHERE kind=? ORDER BY rowid`, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (s *Store) Documents(ctx context.Context, kind string) ([]json.RawMessage, 
 
 func (s *Store) Document(ctx context.Context, kind, id string, value any) error {
 	var data string
-	if err := s.db.QueryRowContext(ctx, `SELECT data FROM documents WHERE kind=? AND id=?`, kind, id).Scan(&data); err != nil {
+	if err := s.docs(kind).QueryRowContext(ctx, `SELECT data FROM documents WHERE kind=? AND id=?`, kind, id).Scan(&data); err != nil {
 		return err
 	}
 	return json.Unmarshal([]byte(data), value)
@@ -42,7 +42,7 @@ func (s *Store) Document(ctx context.Context, kind, id string, value any) error 
 // DeleteDocument removes a document and reports whether it existed, so a
 // caller can consume a one-time document exactly once.
 func (s *Store) DeleteDocument(ctx context.Context, kind, id string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM documents WHERE kind=? AND id=?`, kind, id)
+	res, err := s.docs(kind).ExecContext(ctx, `DELETE FROM documents WHERE kind=? AND id=?`, kind, id)
 	if err != nil {
 		return false, err
 	}

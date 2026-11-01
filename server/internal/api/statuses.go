@@ -48,8 +48,11 @@ var (
 // Status is one request on the board. Member IDs are qualified with the
 // node they live on (node::session) so every machine reads them the same way.
 type Status struct {
-	ID       string        `json:"id"`
-	Home     string        `json:"home"`
+	ID   string `json:"id"`
+	Home string `json:"home"`
+	// Session is the session the status belongs to; a machine in another
+	// session ignores it.
+	Session  string        `json:"session,omitempty"`
 	Text     string        `json:"text"`
 	For      string        `json:"for"`
 	ForName  string        `json:"for_name"`
@@ -114,6 +117,14 @@ func (h *APIHandler) machineOf(ctx context.Context, id string) string {
 		return p.Name
 	}
 	return short(node)
+}
+
+// sessionID names the session this machine runs, or "" without sessions.
+func (h *APIHandler) sessionID(ctx context.Context) string {
+	if w := h.currentWorkspace(ctx); w != nil {
+		return w.ID
+	}
+	return ""
 }
 
 func newStatusID() string {
@@ -183,6 +194,9 @@ func (h *APIHandler) statusPull(ctx context.Context, n Node) {
 func (h *APIHandler) statusReceive(ctx context.Context, s Status) {
 	if s.ID == "" || s.Home == h.selfID() {
 		return
+	}
+	if mine := h.currentWorkspace(ctx); mine != nil && s.Session != mine.ID {
+		return // From another session: it must not appear in this one.
 	}
 	h.statusMu.Lock()
 	var old Status
@@ -467,7 +481,7 @@ func (h *APIHandler) statusPost(ctx context.Context, group *Room, poster, forID,
 		return fmt.Errorf("this group already has %d open statuses", statusPerGroup)
 	}
 	s := Status{
-		ID: newStatusID(), Home: h.selfID(), Text: limited(need, 280),
+		ID: newStatusID(), Home: h.selfID(), Session: h.sessionID(ctx), Text: limited(need, 280),
 		For: h.qualify(forID), ForName: h.agentName(ctx, forID), Machine: h.machineOf(ctx, h.qualify(forID)),
 		Poster: h.qualify(poster), Room: group.ID, RoomName: group.Name,
 		At: now, Expires: now.Add(statusLife),

@@ -210,6 +210,7 @@ class MainActivity : FragmentActivity() {
                     "new-group" -> NewGroupPage(agents, model, onBack = { page = "home" }, onCreate = { name, members -> page = "home"; model.createGroup(name, members) })
                     "start-agent" -> StartAgentPage(model, onBack = { page = "home" }, onStart = { machine, provider, folder -> page = "home"; model.startAgent(machine, provider, folder) })
                     "linked" -> LinkedDevicesPage(model, onBack = { page = "home" })
+                    "sessions" -> io.github.phantomconartist.mace.ui.SessionsPage(model, onBack = { page = "home" })
                     else -> (screen as? Screen.Home)?.let { s ->
                         HomeScreen(s, agents, model, HomeActions(
                             onFilter = model::setFilter,
@@ -223,6 +224,7 @@ class MainActivity : FragmentActivity() {
                             onMarkRead = model::markRead,
                             onSignOut = { model.signOut() },
                             onLinked = { page = "linked" },
+                            onSessions = { page = "sessions" },
                             onLink = model::showLink,
                         ))
                     }

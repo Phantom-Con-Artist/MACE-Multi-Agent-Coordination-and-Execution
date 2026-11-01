@@ -131,6 +131,16 @@ data class Message(
     val delivery: Map<String, String> = emptyMap(),
 )
 
+/** A session on the hub (server/internal/api/workspaces.go). */
+@Serializable
+data class Workspace(
+    val id: String,
+    val name: String = "",
+    val created: String = "",
+    val active: String = "",
+    val current: Boolean = false,
+)
+
 /** One agent's answer to a status, talked over in a side chat. */
 @Serializable
 data class StatusOffer(
@@ -304,6 +314,16 @@ class Hub(val origin: String, private val credential: String? = null, private va
     /** Removes a group; its history stays on the hub. */
     /** Deletes a conversation's messages on the hub. */
     suspend fun clearChat(room: String): JsonElement = post("/api/v1/chats/${enc(room)}/clear", "{}")
+
+    /** Sessions: each has its own agents, groups, and history; one runs at a time. */
+    suspend fun workspaces(): List<Workspace> = get("/api/v1/workspaces")
+
+    suspend fun newWorkspace(name: String): Workspace =
+        post("/api/v1/workspaces", kotlinx.serialization.json.buildJsonObject { put("name", kotlinx.serialization.json.JsonPrimitive(name)) }.toString())
+
+    suspend fun switchWorkspace(id: String): JsonElement = post("/api/v1/workspaces/${enc(id)}/switch", "{}")
+
+    suspend fun removeWorkspace(id: String): JsonElement = post("/api/v1/workspaces/${enc(id)}/remove", "{}")
 
     /** The status board: agents' open requests, and those closed in the last day. */
     suspend fun statuses(): List<AgentStatus> = get("/api/v1/statuses")

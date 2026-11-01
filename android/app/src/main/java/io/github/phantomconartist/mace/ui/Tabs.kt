@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
@@ -177,7 +178,8 @@ fun MachinesTab(model: AppModel) {
 }
 
 @Composable
-fun SettingsTab(hubName: String, model: AppModel, onSignOut: () -> Unit, onLinked: () -> Unit, onLink: () -> Unit) {
+fun SettingsTab(hubName: String, model: AppModel, onSignOut: () -> Unit, onLinked: () -> Unit, onLink: () -> Unit, onSessions: () -> Unit = {}) {
+    val sessions by model.workspaces.collectAsState()
     val linked by model.linked.collectAsState()
     var confirmDelete by remember { mutableStateOf(false) }
     val observe by model.observe.collectAsState()
@@ -201,6 +203,13 @@ fun SettingsTab(hubName: String, model: AppModel, onSignOut: () -> Unit, onLinke
                     Text(hubName.ifEmpty { "Your hub" }, fontSize = 20.sp)
                     Text("MACE ${BuildConfig.VERSION_NAME} · client API ${BuildConfig.MACE_API}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+        }
+        if (sessions.isNotEmpty()) {
+            item { SectionLabel("Session") }
+            item {
+                SettingRow(Icons.Rounded.Inventory2, sessions.firstOrNull { it.current }?.name ?: "Session",
+                    "Start a new session or open a saved one", onClick = onSessions)
             }
         }
         item { SectionLabel("Chats") }
