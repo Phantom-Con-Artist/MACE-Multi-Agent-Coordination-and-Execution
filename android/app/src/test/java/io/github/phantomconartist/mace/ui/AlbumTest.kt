@@ -18,6 +18,11 @@ class AlbumTest {
         assertEquals(3, rows.size)
     }
 
+    @Test fun aCaptionOnTheFirstPictureStillMakesAnAlbum() {
+        val rows = albums(listOf(pic("1", text = "receipts"), pic("2"), pic("3"), pic("4")))
+        assertEquals(listOf(listOf("1", "2", "3", "4")), rows.map { r -> r.map { it.id } })
+    }
+
     @Test fun anotherSenderOrACaptionBreaksTheAlbum() {
         val rows = albums(listOf(pic("1"), pic("2", sec = 1), pic("x", sender = "b", sec = 2), pic("3", sec = 3), pic("4", sec = 4, text = "look")))
         assertEquals(5, rows.size)

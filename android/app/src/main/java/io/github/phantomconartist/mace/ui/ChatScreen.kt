@@ -145,11 +145,13 @@ private fun dayLabel(day: LocalDate): String = when {
 }
 
 /** Each run of messages from one sender within a minute shares one tail. */
-private fun isPicture(m: Message) = m.text.isBlank() && m.kind != "failed" && (kindOf(m.file) == FileKind.Image || kindOf(m.file) == FileKind.Video)
+private fun isMedia(m: Message) = m.kind != "failed" && (kindOf(m.file) == FileKind.Image || kindOf(m.file) == FileKind.Video)
+private fun isPicture(m: Message) = m.text.isBlank() && isMedia(m)
 
 /**
  * Messages as the rows the chat shows: four or more pictures or videos one
- * sender posts in a row, without captions, become one album, as in a messenger.
+ * sender posts in a row become one album, as in a messenger. Only the first
+ * may carry a caption, which the album shows under the grid.
  */
 fun albums(messages: List<Message>): List<List<Message>> {
     val out = mutableListOf<List<Message>>()
@@ -160,7 +162,7 @@ fun albums(messages: List<Message>): List<List<Message>> {
     }
     for (m in messages) {
         if (isPicture(m) && run.isNotEmpty() && !startsRun(run.last(), m)) run += m
-        else { flush(); if (isPicture(m)) run += m else out += listOf(m) }
+        else { flush(); if (isMedia(m)) run += m else out += listOf(m) }
     }
     flush()
     return out
@@ -639,7 +641,12 @@ private fun MessageRow(
                         if (m.flair.isNotEmpty() || m.role.isNotEmpty()) Tags(m.flair, m.role, ink)
                         if (observe && m.activity.isNotEmpty()) StepsDisclosure(m.activity, ink)
                         Box {
-                            if (album.size > 1) Album(album, ink, bubbleMax, media, onOpenFile)
+                            if (album.size > 1) Column {
+                                Album(album, ink, bubbleMax, media, onOpenFile)
+                                if (m.text.isNotBlank()) Body(m.copy(file = ""), reserve, ink, bubbleMax, media, onOpenFile, mentionColors) { name ->
+                                    if (name == "You") mace.read else state.members.firstOrNull { it.name == name }?.let { memberColor(it.id) } ?: MaterialTheme.colorScheme.primary
+                                }
+                            }
                             else Body(m, reserve, ink, bubbleMax, media, onOpenFile, mentionColors) { name ->
                                 if (name == "You") mace.read else state.members.firstOrNull { it.name == name }?.let { memberColor(it.id) } ?: MaterialTheme.colorScheme.primary
                             }

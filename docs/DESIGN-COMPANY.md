@@ -164,6 +164,32 @@ The owner can start a new session: everything new, nothing carried over.
 
 Each phase gets its own tests over real HTTP between two daemons, and a live run on the laptop and the PC before the next phase starts.
 
+## Next pass: what the live runs found (2026-11-01)
+
+Two live runs on the laptop hub and the PC: a 13-agent Desmos build (done in 17 minutes, but with an integration bug) and a 6-agent run that used jobs, statuses, offers, side chats, albums, and video.
+
+**Job board**
+- The lead cannot cancel or close a job it posted. Stale and duplicate jobs stay open ("only the owner of job ja1fc can do that"). Let the poster and the lead `[drop]` or `[close]` an unclaimed job.
+- A need the registry does not measure (`browser`) makes a job impossible to claim, and nobody is told. Refuse such a job when it is posted, and name the needs that are known.
+- The unclaimed-job nudge (10 minutes to the lead, 30 to the owner) did not fire. Dark mode sat unclaimed for 15 minutes until the owner stepped in.
+- A coworker that is waiting on someone else's job is never woken when that job finishes. Wake whoever mentioned the job on `[done]` or `[approve]`.
+
+**Tag parsing**
+- Tags inside inline code still run. When Codex wrote an example in backticks, it ran as Codex's own `[done]`, and `[share: path]` in backticks became "(could not share path: not found)" in the text.
+- `[group]` shows as literal text in side-chat replies, and `[dm @handle]` in the middle of a message is ignored.
+
+**Statuses**
+- An idle agent outside the team never sees a status, because statuses arrive only with its next turn. The freelancer offered only after the owner messaged it. Decide whether a status wakes idle agents that have no work, within a budget.
+
+**Teams and git**
+- The Desmos lead put no work on the six PC agents, and its staffing did not use the registry. The lead's prompt should require staffing every machine, or saying why not.
+- Codex's sandbox could not write `.git` in its own clone ("mounted read-only"), so a coworker merged to main. Agents on other machines had no GitHub credentials and could not push. Phase 2 (the hub git repo) removes both problems.
+- 54 unit tests passed while the app's sliders did nothing: `App.jsx` called `updateSliderValue` with the wrong arguments. Done and design approval should need one end-to-end check of what the owner asked for, not just green unit tests.
+
+**Phone**
+- On the Motorola, the frame grab for one agent-made MP4 (OpenH264 Baseline, 1200x756) fails with "all codecs failed", even with the fallback grabs, so the tile shows no picture. Consider a poster frame made on the hub with ffmpeg.
+- Fixed in this pass: an album may start with a captioned picture, and the caption shows under the grid.
+
 ## Open questions
 
 - Should the job board be one tab with statuses ("Board": Needs and Jobs), or a separate tab? Proposed: one Board tab with two sections.

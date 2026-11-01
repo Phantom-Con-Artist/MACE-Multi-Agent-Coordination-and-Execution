@@ -102,3 +102,6 @@ android/.kotlin/
 
 # Private working notes about the codebase (never committed)
 STATUS.local.md
+
+# Promo captures (local only)
+/promo/

@@ -132,7 +132,13 @@ class MediaLoader(private val hub: () -> Hub) {
                 MediaMetadataRetriever().use { r ->
                     r.setDataSource(hub().fileUrl(path), hub().headers())
                     r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.let { durations[path] = it }
-                    r.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, maxPx, maxPx)
+                    // Some phone decoders refuse a scaled grab or the very first frame; try a full frame, then one a second in.
+                    runCatching { r.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, maxPx, maxPx) }.getOrNull()
+                        ?: (r.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: r.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST))
+                            ?.let { full ->
+                                val scale = maxPx.toFloat() / maxOf(full.width, full.height)
+                                if (scale >= 1f) full else Bitmap.createScaledBitmap(full, (full.width * scale).toInt(), (full.height * scale).toInt(), true)
+                            }
                 }
             }.getOrNull()
         }
